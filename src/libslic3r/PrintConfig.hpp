@@ -1580,6 +1580,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionInts,               nozzle_temperature_range_high))
     ((ConfigOptionFloatsNullable,     wipe_distance))
     ((ConfigOptionBool,               enable_mixed_color_sublayer))
+    ((ConfigOptionFloat,              mixed_color_sublayer_min_height))
     ((ConfigOptionBool,               enable_prime_tower))
     ((ConfigOptionBool,               prime_tower_enable_framework))
     // BBS: change wipe_tower_x and wipe_tower_y data type to floats to add partplate logic

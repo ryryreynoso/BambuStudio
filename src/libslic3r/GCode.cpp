@@ -5647,6 +5647,10 @@ GCode::LayerResult GCode::process_layer(
                     std::vector<double> sub_heights_local(grp.components_0based.size());
                     for (size_t ci = 0; ci < grp.components_0based.size(); ++ci)
                         sub_heights_local[ci] = (static_cast<int>(ci) == grp.gradient_first_sorted_idx) ? r1 * lh : r2 * lh;
+                    // Full Spectrum minimum sublayer height; a component clamped to 0 gets an
+                    // empty pass, which callers skip.
+                    if (const double min_h = print.config().mixed_color_sublayer_min_height.value; min_h > 0.)
+                        sub_heights_local = clamp_mixed_sublayer_heights(sub_heights_local, min_h);
                     double cum = 0.0;
                     for (int ci = 0; ci < sub_idx; ++ci)
                         cum += sub_heights_local[ci];
@@ -5769,7 +5773,7 @@ GCode::LayerResult GCode::process_layer(
                 };
 
                 for (auto &entry : emit_plan) {
-                    if (entry.skip)
+                    if (entry.skip || entry.sub_h <= 0.)
                         continue;
                     m_sub_layer_flow_ratio = entry.sub_h / lh;
                     m_sub_layer_height     = entry.sub_h;

@@ -6258,6 +6258,19 @@ void PrintConfigDef::init_fff_params()
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionBool(false));
 
+    // Full Spectrum "Local-Z minimum sublayer height" (mixed_filament_height_lower_bound).
+    def = this->add("mixed_color_sublayer_min_height", coFloat);
+    def->label = L("Minimum sublayer height");
+    def->tooltip = L("Smallest height of one mixed color sub-layer. Requested ratios are clamped so every "
+                     "printed sub-layer is at least this tall; if a layer is too thin for all components, the "
+                     "smallest ones are dropped on that layer. 0 disables the limit.");
+    def->sidetext = "mm";
+    def->category = L("Quality");
+    def->min = 0;
+    def->max = 0.2;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
     def = this->add("enable_prime_tower", coBool);
     def->label = L("Enable");
     def->tooltip = L("The wiping tower can be used to clean up the residue on the nozzle and stabilize the chamber pressure inside the nozzle, "

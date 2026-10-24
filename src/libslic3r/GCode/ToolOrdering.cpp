@@ -2151,6 +2151,8 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
         return;
 
     const bool sublayer_enabled = config.enable_mixed_color_sublayer.value;
+    // Full Spectrum minimum sublayer height; 0 keeps the native behavior unchanged.
+    const double min_sublayer_height = config.mixed_color_sublayer_min_height.value;
 
     struct SlotInfo {
         std::vector<unsigned int> components; // 1-based
@@ -2535,6 +2537,28 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                     grp.components_0based.push_back(comp_0based);
                 }
                 grp.sub_heights = sub_heights;
+
+                // Ratio-mode sub-layers honor the minimum height here, and components clamped to
+                // zero are removed so no empty pass (and no needless filament change) is planned.
+                // Gradients are clamped per object in GCode.cpp, where their heights are computed.
+                if (!grp.is_gradient && min_sublayer_height > 0.) {
+                    const std::vector<double> clamped = clamp_mixed_sublayer_heights(grp.sub_heights, min_sublayer_height);
+                    std::vector<unsigned int> kept_comps;
+                    std::vector<double>       kept_heights;
+                    for (size_t k = 0; k < clamped.size(); ++k)
+                        if (clamped[k] > 0.) {
+                            kept_comps.push_back(grp.components_0based[k]);
+                            kept_heights.push_back(clamped[k]);
+                        }
+                    if (kept_comps.size() == 1) {
+                        lt.mixed_filament_resolution[ext] = kept_comps.front();
+                        new_extruders.push_back(kept_comps.front());
+                        prev_print_z_for_slot[ext] = lt.print_z;
+                        continue;
+                    }
+                    grp.components_0based = std::move(kept_comps);
+                    grp.sub_heights       = std::move(kept_heights);
+                }
 
                 // Write gradient metadata (run-aware). Both per_object_gradient and
                 // per_volume_gradient are populated independently from their own run-state

@@ -70,7 +70,7 @@ system stays mergeable with future Bambu releases and keeps MakerWorld projects 
 | 11 | Full-domain subdivision | Applies to all slot geometry | `dithering_local_z_whole_objects` | Pending review |
 | 12 | Infill subdivision | Always | `dithering_local_z_infill` | Toggle pending |
 | 13 | Gradient slicing + preview | Yes (2 comps) | `Gradient*.cpp` | See #5 |
-| 14 | Minimum mix height | No | `mixed_filament_height_lower_bound` | Pending |
+| 14 | Minimum mix height | No | `mixed_filament_height_lower_bound` | **Engine done** (`mixed_color_sublayer_min_height`, Quality tab) |
 | 15 | Save / reopen | Yes (project config) | FS 3MF JSON | Native; new keys persist via project config; FS-project import pending |
 | 16 | Compatibility warnings | Type consistency, integrity | | AMS cost warnings pending |
 | 17 | Usage / toolchange estimates | GCodeProcessor | | AMS cost estimate pending |
@@ -108,6 +108,19 @@ color catalogue (`FilamentColorLibrary`), Snapmaker device code, U1 profiles.
 * Deleting a physical filament shifts pattern steps; a pattern that used the deleted filament is
   cleared (the slot is already flagged broken by Bambu's component remap).
 * Tests: `tests/libslic3r/test_filament_mixer_pattern.cpp`.
+
+### Minimum sublayer height (`mixed_color_sublayer_min_height`)
+
+* Process option on the Quality tab next to "Mixed color sublayer", default 0 (off), so existing
+  projects slice byte-identically. Full Spectrum's default is 0.06 mm.
+* `clamp_mixed_sublayer_heights()` generalizes Full Spectrum's two-component
+  `mixed_filament_local_z_pair_heights()` to N components. For two components it is checked
+  against a verbatim copy of the Full Spectrum function over 2,772 input combinations.
+* Ratio-mode sub-layers are clamped in `ToolOrdering`; components clamped to zero are removed
+  from the group, so no empty pass or needless filament change is planned. Gradient heights are
+  computed per object in `GCode.cpp` and clamped there; a zero-height pass is skipped (the filament
+  change for it may still happen, which wastes some purge but never prints wrong geometry).
+* Tests: `tests/libslic3r/test_filament_mixer_sublayer.cpp`.
 
 ## 7. Bambu AMS adaptation
 

@@ -745,6 +745,65 @@ static void check_mixed_array_size_required(std::map<std::string, std::string> &
     }
 }
 
+std::vector<double> clamp_mixed_sublayer_heights(const std::vector<double> &heights, double min_height)
+{
+    constexpr double eps = 1e-9;
+    if (min_height <= 0. || heights.empty())
+        return heights;
+
+    std::vector<double> out = heights;
+    for (double &h : out)
+        h = std::max(0., h);
+    const double total = std::accumulate(out.begin(), out.end(), 0.);
+    if (total <= eps)
+        return out;
+
+    // Drop the smallest active entries until the remaining ones can each get min_height.
+    auto active_count = [&]() { return size_t(std::count_if(out.begin(), out.end(), [&](double h) { return h > eps; })); };
+    while (active_count() > 1 && double(active_count()) * min_height > total + eps) {
+        size_t smallest = out.size();
+        for (size_t i = 0; i < out.size(); ++i)
+            if (out[i] > eps && (smallest == out.size() || out[i] < out[smallest]))
+                smallest = i;
+        out[smallest] = 0.;
+        const double rest = std::accumulate(out.begin(), out.end(), 0.);
+        for (double &h : out)
+            h *= total / rest;
+    }
+    if (active_count() == 1)
+        return out;
+
+    // Water filling: pin entries below min_height to it, scale the free ones to keep the sum.
+    std::vector<bool> pinned(out.size(), false);
+    for (bool changed = true; changed;) {
+        changed = false;
+        double pinned_sum = 0., free_sum = 0.;
+        for (size_t i = 0; i < out.size(); ++i) {
+            if (out[i] <= eps)
+                continue;
+            if (pinned[i])
+                pinned_sum += min_height;
+            else
+                free_sum += out[i];
+        }
+        const double scale = free_sum > eps ? (total - pinned_sum) / free_sum : 0.;
+        for (size_t i = 0; i < out.size(); ++i) {
+            if (out[i] <= eps)
+                continue;
+            if (pinned[i]) {
+                out[i] = min_height;
+            } else {
+                out[i] *= scale;
+                if (out[i] < min_height - eps) {
+                    pinned[i] = true;
+                    changed   = true;
+                }
+            }
+        }
+    }
+    return out;
+}
+
 static bool is_mixed_pattern_separator(char c)
 {
     return c == '/' || c == ' ' || c == '\t' || c == '-' || c == '_';

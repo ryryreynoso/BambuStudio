@@ -186,6 +186,18 @@ std::vector<unsigned int> mixed_pattern_layer_sequence(const std::vector<std::ve
 // Returns 0 when the sequence is empty.
 unsigned int resolve_mixed_pattern(const std::vector<unsigned int> &sequence, size_t layer_index);
 
+// ---- Minimum sublayer height (Full Spectrum Local-Z lower bound) -----------------
+// Generalizes Full Spectrum's mixed_filament_local_z_pair_heights() from two to N components.
+// Given the requested sub-layer heights of one layer (same order as the components), returns
+// heights with the same sum where every non-zero entry is >= min_height:
+//  * entries that are already 0 stay 0;
+//  * while the layer is too thin for all non-zero entries, the smallest one is dropped
+//    (set to 0) and its height goes to the others in proportion; ties drop the earlier entry,
+//    matching Full Spectrum's 50/50 case, which keeps component B;
+//  * entries below min_height are raised to it and the others shrink in proportion.
+// min_height <= 0 returns the input unchanged.
+std::vector<double> clamp_mixed_sublayer_heights(const std::vector<double> &heights, double min_height);
+
 // Validate mixed-color (混色) parameters. Returns error messages keyed by option name.
 // Slot details are included in the message text (1-based slot index).
 std::map<std::string, std::string> validate_mixed_filament_params(

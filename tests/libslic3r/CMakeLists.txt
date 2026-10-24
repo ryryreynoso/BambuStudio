@@ -26,6 +26,7 @@ add_executable(${_TEST_NAME}_tests
     test_debounce.cpp
     test_emboss.cpp
     test_filament_mixer_pattern.cpp
+    test_filament_mixer_sublayer.cpp
     ../libnest2d/printer_parts.cpp
 	)
 
