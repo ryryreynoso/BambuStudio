@@ -5,6 +5,9 @@
 #include "libslic3r/FilamentMixer.hpp"
 #include "libslic3r/Format/FullSpectrumProjectImport.hpp"
 #include "libslic3r/FullSpectrum/MixedFilament.hpp"
+#include "libslic3r/miniz_extension.hpp"
+
+#include <boost/filesystem.hpp>
 
 #include <algorithm>
 
@@ -147,4 +150,41 @@ TEST_CASE("Full Spectrum import of an empty project is a no-op", "[FullSpectrumI
     REQUIRE(convert_full_spectrum_mixed_filaments(settings, k_colours, 28).slots.empty());
     settings.mixed_filament_definitions = "1,2,1,0,50";
     REQUIRE(convert_full_spectrum_mixed_filaments(settings, {"#FF0000"}, 28).slots.empty());
+}
+
+TEST_CASE("Full Spectrum settings are read from a 3MF project", "[FullSpectrumImport]")
+{
+    namespace fs = boost::filesystem;
+    const fs::path path = fs::temp_directory_path() / fs::unique_path("fs_import_%%%%%%%%.3mf");
+    const std::string json = R"({
+        "name": "project_settings",
+        "filament_colour": ["#FF0000", "#00FF00", "#0000FF"],
+        "layer_height": "0.16",
+        "dithering_local_z_mode": "1",
+        "mixed_filament_gradient_mode": "0",
+        "mixed_filament_advanced_dithering": "1",
+        "mixed_filament_height_lower_bound": "0.05",
+        "mixed_filament_definitions": "1,2,1,1,40"
+    })";
+    {
+        mz_zip_archive zip;
+        mz_zip_zero_struct(&zip);
+        REQUIRE(open_zip_writer(&zip, path.string()));
+        REQUIRE(mz_zip_writer_add_mem(&zip, "Metadata/project_settings.config", json.data(), json.size(), MZ_DEFAULT_COMPRESSION));
+        REQUIRE(mz_zip_writer_finalize_archive(&zip));
+        close_zip_writer(&zip);
+    }
+    FullSpectrumProjectSettings settings;
+    std::vector<std::string>    colours;
+    REQUIRE(read_full_spectrum_project_settings(path.string(), settings, colours));
+    fs::remove(path);
+    REQUIRE(settings.mixed_filament_definitions == "1,2,1,1,40");
+    REQUIRE(settings.local_z_mode);
+    REQUIRE_FALSE(settings.gradient_height_mode);
+    REQUIRE(settings.advanced_dithering);
+    REQUIRE(settings.layer_height == Approx(0.16));
+    REQUIRE(settings.min_sublayer_height == Approx(0.05));
+    REQUIRE(colours == std::vector<std::string>{"#FF0000", "#00FF00", "#0000FF"});
+
+    REQUIRE_FALSE(read_full_spectrum_project_settings((fs::temp_directory_path() / "does_not_exist.3mf").string(), settings, colours));
 }

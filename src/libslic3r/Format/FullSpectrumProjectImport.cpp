@@ -3,6 +3,9 @@
 #include "../FilamentMixer.hpp"
 #include "../FullSpectrum/MixedFilament.hpp"
 #include "../LocalesUtils.hpp"
+#include "../miniz_extension.hpp"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -66,7 +69,83 @@ std::optional<size_t> find_period(const std::vector<unsigned int> &seq)
     return std::nullopt;
 }
 
+// Project settings store scalars as strings ("0.2", "1").
+bool json_bool(const nlohmann::json &j, const char *key, bool fallback)
+{
+    auto it = j.find(key);
+    if (it == j.end())
+        return fallback;
+    if (it->is_boolean())
+        return it->get<bool>();
+    if (it->is_number())
+        return it->get<double>() != 0.;
+    if (it->is_string())
+        return it->get<std::string>() == "1" || it->get<std::string>() == "true";
+    return fallback;
+}
+
+double json_double(const nlohmann::json &j, const char *key, double fallback)
+{
+    auto it = j.find(key);
+    if (it == j.end())
+        return fallback;
+    if (it->is_number())
+        return it->get<double>();
+    if (it->is_string()) {
+        try {
+            return std::stod(it->get<std::string>());
+        } catch (...) {}
+    }
+    return fallback;
+}
+
 } // namespace
+
+bool read_full_spectrum_project_settings(const std::string           &path_3mf,
+                                         FullSpectrumProjectSettings &settings,
+                                         std::vector<std::string>    &physical_colours)
+{
+    mz_zip_archive archive;
+    mz_zip_zero_struct(&archive);
+    if (!open_zip_reader(&archive, path_3mf))
+        return false;
+
+    std::string text;
+    const int   index = mz_zip_reader_locate_file(&archive, "Metadata/project_settings.config", nullptr, 0);
+    if (index >= 0) {
+        size_t size = 0;
+        if (void *data = mz_zip_reader_extract_to_heap(&archive, mz_uint(index), &size, 0)) {
+            text.assign(static_cast<const char *>(data), size);
+            mz_free(data);
+        }
+    }
+    close_zip_reader(&archive);
+    if (text.empty())
+        return false;
+
+    CNumericLocalesSetter locale_setter;
+    const nlohmann::json  j = nlohmann::json::parse(text, nullptr, false);
+    if (j.is_discarded() || !j.is_object())
+        return false;
+    auto defs = j.find("mixed_filament_definitions");
+    if (defs == j.end() || !defs->is_string() || defs->get<std::string>().empty())
+        return false;
+
+    settings.mixed_filament_definitions = defs->get<std::string>();
+    settings.local_z_mode               = json_bool(j, "dithering_local_z_mode", settings.local_z_mode);
+    settings.gradient_height_mode       = json_bool(j, "mixed_filament_gradient_mode", settings.gradient_height_mode);
+    settings.advanced_dithering         = json_bool(j, "mixed_filament_advanced_dithering", settings.advanced_dithering);
+    settings.layer_height               = json_double(j, "layer_height", settings.layer_height);
+    settings.min_sublayer_height        = json_double(j, "mixed_filament_height_lower_bound", settings.min_sublayer_height);
+
+    physical_colours.clear();
+    auto colours = j.find("filament_colour");
+    if (colours != j.end() && colours->is_array())
+        for (const auto &c : *colours)
+            if (c.is_string())
+                physical_colours.push_back(c.get<std::string>());
+    return true;
+}
 
 FullSpectrumImportResult convert_full_spectrum_mixed_filaments(const FullSpectrumProjectSettings &settings,
                                                                const std::vector<std::string>    &physical_colours,

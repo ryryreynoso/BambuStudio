@@ -52,6 +52,13 @@ struct FullSpectrumImportResult
     std::vector<std::string>            warnings;
 };
 
+// Read the Full Spectrum keys and the physical filament colours from a 3MF project's
+// Metadata/project_settings.config. Returns false when the archive cannot be read or has no
+// Full Spectrum mixed rows.
+bool read_full_spectrum_project_settings(const std::string           &path_3mf,
+                                         FullSpectrumProjectSettings &settings,
+                                         std::vector<std::string>    &physical_colours);
+
 // Convert the Full Spectrum rows of a project with `physical_colours.size()` physical filaments.
 // `max_slots` is the number of mixed slots the target project can still take.
 FullSpectrumImportResult convert_full_spectrum_mixed_filaments(const FullSpectrumProjectSettings &settings,
