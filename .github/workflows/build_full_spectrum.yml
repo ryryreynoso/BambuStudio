@@ -1,0 +1,39 @@
+name: Build Full Spectrum branch
+
+# Builds the Full Spectrum port for Apple Silicon macOS and Windows x64 by reusing the
+# upstream build pipeline (build_check_cache.yml -> build_deps.yml -> build_bambu.yml).
+# The macOS job uploads a zipped, unsigned BambuStudio.app as a workflow artifact.
+
+on:
+  push:
+    branches:
+     - feature/full-spectrum
+    paths:
+     - 'deps/**'
+     - 'src/**'
+     - 'tests/**'
+     - '**/CMakeLists.txt'
+     - 'resources/**'
+     - '.github/workflows/build_*.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: windows-latest
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: ${{ matrix.os }}
+      arch: ${{ matrix.arch }}
+      build-deps-only: false
+    secrets: inherit
