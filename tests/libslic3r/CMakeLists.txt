@@ -25,11 +25,6 @@ add_executable(${_TEST_NAME}_tests
     test_triangle_selector.cpp
     test_debounce.cpp
     test_emboss.cpp
-    test_filament_mixer_pattern.cpp
-    test_filament_mixer_sublayer.cpp
-    test_full_spectrum_core.cpp
-    test_full_spectrum_import.cpp
-    test_full_spectrum_gradient.cpp
     ../libnest2d/printer_parts.cpp
 	)
 
@@ -51,3 +46,17 @@ endif()
 
 # catch_discover_tests(${_TEST_NAME}_tests TEST_PREFIX "${_TEST_NAME}: ")
 add_test(${_TEST_NAME}_tests ${_TEST_NAME}_tests ${CATCH_EXTRA_ARGS})
+
+# Full Spectrum color mixing tests. A separate target so they build and run independently of the
+# upstream libslic3r_tests sources (test_3mf.cpp currently fails to compile upstream).
+add_executable(full_spectrum_tests
+    ${_TEST_NAME}_tests.cpp
+    test_filament_mixer_pattern.cpp
+    test_filament_mixer_sublayer.cpp
+    test_full_spectrum_core.cpp
+    test_full_spectrum_import.cpp
+    test_full_spectrum_gradient.cpp
+    )
+target_link_libraries(full_spectrum_tests test_common libslic3r)
+set_property(TARGET full_spectrum_tests PROPERTY FOLDER "tests")
+add_test(full_spectrum_tests full_spectrum_tests ${CATCH_EXTRA_ARGS})
