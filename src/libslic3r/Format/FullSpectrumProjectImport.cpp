@@ -222,10 +222,16 @@ FullSpectrumImportResult convert_full_spectrum_mixed_filaments(const FullSpectru
             slot.gradient       = true;
             slot.gradient_range = format_ratio(start).substr(0, 4) + "," + format_ratio(end).substr(0, 4);
             slot.uses_sublayers = true;
+        } else if (gradient && comps.size() >= 3) {
+            // Native multi-filament gradients use Full Spectrum's sampler with stops derived from
+            // the component weights, as Full Spectrum does when no explicit stops are stored.
+            if (!def.behavior.gradient.stop_positions.empty())
+                result.warnings.push_back(label + ": custom gradient stop positions were replaced by weight-based stops.");
+            slot.components     = join_ids(comps);
+            slot.ratios         = ratios_from_weights(std::vector<double>(percents.begin(), percents.end()));
+            slot.gradient       = true;
+            slot.uses_sublayers = true;
         } else if (local_z) {
-            if (gradient)
-                result.warnings.push_back(label + ": gradients with more than two filaments are not supported yet; imported as a "
-                                                  "fixed mix with sub-layers.");
             slot.components     = join_ids(comps);
             slot.ratios         = ratios_from_weights(std::vector<double>(percents.begin(), percents.end()));
             slot.uses_sublayers = true;

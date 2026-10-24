@@ -10,6 +10,7 @@
 #include "PresetBundle.hpp"
 #include "MultiNozzleUtils.hpp"
 #include "FilamentMixer.hpp"
+#include "FullSpectrum/GradientBridge.hpp"
 #include "LocalesUtils.hpp"
 #include "Utils.hpp"
 
@@ -2237,11 +2238,15 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
     std::vector<bool> is_gradient(is_mixed.size(), false);
     std::vector<GradientInfo> gradient_info(is_mixed.size());
     for (size_t i = 0; i < is_mixed.size(); ++i) {
-        if (!is_mixed[i] || slots[i].components.size() != 2)
+        // Gradients with three or more filaments follow Full Spectrum's multi-filament gradient;
+        // the range and curve settings only apply to two-filament gradients.
+        if (!is_mixed[i] || slots[i].components.size() < 2 || !slots[i].pattern.empty())
             continue;
         if (i >= gradient_flags.size() || !gradient_flags[i])
             continue;
         is_gradient[i] = true;
+        if (slots[i].components.size() != 2)
+            continue;
         if (i < gradient_range_strs.size() && !gradient_range_strs[i].empty()) {
             CNumericLocalesSetter c_locale_setter;
             float v0 = 0, v1 = 0;
@@ -2507,10 +2512,25 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                         for (double r : s.ratios)
                             sub_heights.push_back(r * lh);
                     }
+                } else if (is_gradient[ext] && n >= 3) {
+                    // Multi-filament gradient (Full Spectrum): only the adjacent pair active at this
+                    // height prints; the others get zero height and are dropped below.
+                    double t = 0.5;
+                    auto gr_it = gradient_runs.find(ext);
+                    if (gr_it != gradient_runs.end() && gr_it->second.current_run >= 0 &&
+                        static_cast<size_t>(gr_it->second.current_run) < gr_it->second.run_lengths.size()) {
+                        auto  &run = gr_it->second;
+                        size_t N   = run.run_lengths[run.current_run];
+                        size_t idx = run.current_idx++;
+                        t          = (N > 0) ? (2.0 * idx + 1.0) / (2.0 * N) : 0.5;
+                    }
+                    for (double w : sample_multi_filament_gradient(s.components, s.ratios, t))
+                        sub_heights.push_back(w * lh);
                 } else {
                     for (double r : s.ratios)
                         sub_heights.push_back(r * lh);
                 }
+                const bool multi_gradient = is_gradient[ext] && n >= 3;
 
                 // Per-part gradient: when this slot has any qualifying volume, the global
                 // no-split short-circuit must NOT bypass MixedSubLayerGroup creation — each
@@ -2531,7 +2551,9 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                 LayerTools::MixedSubLayerGroup grp;
                 grp.mixed_slot_0based = ext;
                 grp.layer_height = lh;
-                grp.is_gradient = is_gradient[ext];
+                // GCode.cpp re-derives per-object gradient heights for two-filament gradients only;
+                // multi-filament gradients print the heights planned here.
+                grp.is_gradient = is_gradient[ext] && !multi_gradient;
                 for (size_t k = 0; k < s.components.size(); ++k) {
                     unsigned int comp_0based = s.components[k] - 1;
                     grp.components_0based.push_back(comp_0based);
@@ -2541,7 +2563,7 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                 // Ratio-mode sub-layers honor the minimum height here, and components clamped to
                 // zero are removed so no empty pass (and no needless filament change) is planned.
                 // Gradients are clamped per object in GCode.cpp, where their heights are computed.
-                if (!grp.is_gradient && min_sublayer_height > 0.) {
+                if ((!grp.is_gradient && min_sublayer_height > 0.) || multi_gradient) {
                     const std::vector<double> clamped = clamp_mixed_sublayer_heights(grp.sub_heights, min_sublayer_height);
                     std::vector<unsigned int> kept_comps;
                     std::vector<double>       kept_heights;
@@ -2661,7 +2683,11 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                 // Only affects the first layer; when sublayer splitting is enabled
                 // (required for gradient), layers 1+ take the sublayer path and
                 // do not touch the DRR accumulator.
-                if (layer_idx == 0 && is_gradient[ext] && s.components.size() == 2) {
+                if (layer_idx == 0 && is_gradient[ext] && s.components.size() >= 3) {
+                    // Multi-filament gradients start with their first filament.
+                    s.accum.assign(s.accum.size(), 0LL);
+                    s.accum[0] = lh_i;
+                } else if (layer_idx == 0 && is_gradient[ext] && s.components.size() == 2) {
                     double r0 = gradient_info[ext].start;
                     s.accum[0] += std::llround(r0 * lh_i);
                     s.accum[1] += std::llround((1.0 - r0) * lh_i);

@@ -997,19 +997,16 @@ std::map<std::string, std::string> validate_mixed_filament_params(
 
         const bool gradient_on = i < gradient_flags.size() && gradient_flags[i];
         if (gradient_on) {
-            if (components.size() != 2) {
-                append_error(errors, "filament_mixed_gradient",
-                       slot + ": gradient requires exactly 2 components");
-            }
-
-            if (gradient_specified) {
+            // Three or more components form a Full Spectrum multi-filament gradient; the
+            // range and curve only describe two-filament gradients.
+            if (gradient_specified && components.size() == 2) {
                 std::string range_err;
                 const std::string range_str = i < gradient_range_strs.size() ? gradient_range_strs[i] : "";
                 if (!validate_gradient_range_strict(range_str, range_err))
                     append_error(errors, "filament_mixed_gradient_range", slot + ": " + range_err);
             }
 
-            if (curve_specified) {
+            if (curve_specified && components.size() == 2) {
                 const std::string curve_str = i < gradient_curve_strs.size() ? gradient_curve_strs[i] : "";
                 if (!curve_str.empty() && parse_gradient_curve(curve_str).empty())
                     append_error(errors, "filament_mixed_gradient_curve",

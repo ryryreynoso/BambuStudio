@@ -272,6 +272,8 @@ set(lisbslic3r_sources
     FullSpectrum/FullSpectrumKSPairResidual.hpp
     FullSpectrum/FullSpectrumMaterialDatabaseProfile.h
     FullSpectrum/FullSpectrumMaterialHigherOrderProfile.h
+    FullSpectrum/GradientBridge.cpp
+    FullSpectrum/GradientBridge.hpp
     FullSpectrum/MixedFilament.cpp
     FullSpectrum/MixedFilament.hpp
     FullSpectrum/MixedFilament/ColorNames.cpp

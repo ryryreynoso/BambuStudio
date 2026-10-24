@@ -29,6 +29,7 @@ add_executable(${_TEST_NAME}_tests
     test_filament_mixer_sublayer.cpp
     test_full_spectrum_core.cpp
     test_full_spectrum_import.cpp
+    test_full_spectrum_gradient.cpp
     ../libnest2d/printer_parts.cpp
 	)
 

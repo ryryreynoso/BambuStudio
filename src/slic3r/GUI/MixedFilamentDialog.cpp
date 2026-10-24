@@ -17,6 +17,7 @@
 
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/FilamentMixer.hpp"
+#include "libslic3r/FullSpectrum/GradientBridge.hpp"
 #include "I18N.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
@@ -723,6 +724,30 @@ wxBoxSizer* MixedFilamentDialog::create_preview_panel()
             wxColour bg = StateColor::darkModeColorFor(*wxWHITE);
             dc.SetBrush(*wxTRANSPARENT_BRUSH);
             dc.SetPen(wxPen(bg, r * 2));
+            dc.DrawRoundedRectangle(x0 - r, y0 - r, swatch_sz + r * 2, swatch_sz + r * 2, radius * 2);
+        } else if (m_result.gradient_enabled && n >= 3) {
+            // Multi-filament gradient, bottom to top, sampled exactly as it will be sliced.
+            std::vector<unsigned int> comps;
+            std::vector<double>       weights_in;
+            std::vector<wxColour>     cols;
+            for (size_t i = 0; i < n; ++i) {
+                comps.push_back(comp(i));
+                weights_in.push_back(ratio(i) / 100.0);
+                cols.push_back(comp_colour(i));
+            }
+            const int bands = std::max(80, swatch_sz);
+            const double band_h = static_cast<double>(swatch_sz) / bands;
+            dc.SetPen(*wxTRANSPARENT_PEN);
+            for (int b = 0; b < bands; ++b) {
+                const double t = 1.0 - (b + 0.5) / bands;
+                dc.SetBrush(wxBrush(blend_n_colors(cols, Slic3r::sample_multi_filament_gradient(comps, weights_in, t))));
+                const int by = y0 + static_cast<int>(b * band_h);
+                const int bh = static_cast<int>((b + 1) * band_h) - static_cast<int>(b * band_h) + 1;
+                dc.DrawRectangle(x0, by, swatch_sz, bh);
+            }
+            const int r = static_cast<int>(radius);
+            dc.SetBrush(*wxTRANSPARENT_BRUSH);
+            dc.SetPen(wxPen(StateColor::darkModeColorFor(*wxWHITE), r * 2));
             dc.DrawRoundedRectangle(x0 - r, y0 - r, swatch_sz + r * 2, swatch_sz + r * 2, radius * 2);
         } else {
             std::vector<wxColour> cols;
@@ -1626,9 +1651,9 @@ void MixedFilamentDialog::on_gradient_toggled()
     if (m_ratio_sizer)
         m_ratio_sizer->ShowItems(!m_result.gradient_enabled && num_components() == 2);
     if (m_combo_gradient_dir)
-        m_combo_gradient_dir->Show(m_result.gradient_enabled);
+        m_combo_gradient_dir->Show(m_result.gradient_enabled && num_components() == 2);
     if (m_per_part_gradient_sizer)
-        m_per_part_gradient_sizer->ShowItems(m_result.gradient_enabled);
+        m_per_part_gradient_sizer->ShowItems(m_result.gradient_enabled && num_components() == 2);
     if (m_curve_sizer)
         m_curve_sizer->ShowItems(m_result.gradient_enabled && num_components() == 2);
     if (!m_result.gradient_enabled) {
@@ -2077,22 +2102,21 @@ void MixedFilamentDialog::update_component_count_ui()
     if (m_triangle_sizer)
         m_triangle_sizer->ShowItems(is_three);
 
-    // 3-color: hide gradient entirely, force off
+    // 3-color gradients are Full Spectrum multi-filament gradients: no direction, curve or
+    // per-part option; the triangle picker sets how much height each filament gets.
     if (m_gradient_sizer) {
-        bool show_gradient = is_two;
-        m_chk_gradient->Show(show_gradient);
-        if (m_label_gradient) m_label_gradient->Show(show_gradient);
-        m_combo_gradient_dir->Show(show_gradient && m_result.gradient_enabled);
+        m_chk_gradient->Show(true);
+        if (m_label_gradient) m_label_gradient->Show(true);
+        m_combo_gradient_dir->Show(is_two && m_result.gradient_enabled);
         if (m_per_part_gradient_sizer)
-            m_per_part_gradient_sizer->ShowItems(show_gradient && m_result.gradient_enabled);
+            m_per_part_gradient_sizer->ShowItems(is_two && m_result.gradient_enabled);
         if (m_curve_sizer)
-            m_curve_sizer->ShowItems(show_gradient && m_result.gradient_enabled);
+            m_curve_sizer->ShowItems(is_two && m_result.gradient_enabled);
     }
     if (is_three) {
-        m_result.gradient_enabled = false;
-        if (m_chk_gradient) m_chk_gradient->SetValue(false);
         m_result.per_part_gradient = false;
         if (m_chk_per_part_gradient) m_chk_per_part_gradient->SetValue(false);
+        m_result.gradient_curve.clear();
     }
 
     if (m_btn_add_material) {
