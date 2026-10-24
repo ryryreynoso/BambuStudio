@@ -2983,6 +2983,16 @@ void PrintConfigDef::init_fff_params()
     def->mode    = comDevelop;
     def->set_default_value(new ConfigOptionBools{false});
 
+    // Full Spectrum "Cycle" mode (ported from OrcaSlicer-FullSpectrum manual patterns).
+    def          = this->add("filament_mixed_pattern", coStrings);
+    def->label   = L("Mixed filament cycle pattern");
+    def->tooltip = L("Optional exact layer sequence for a mixed filament, as 1-based physical filament "
+                     "indices separated by \"/\", e.g. \"1/1/2\" prints two layers of filament 1 then one "
+                     "layer of filament 2, repeating. When set, it replaces the ratio cadence and the slot is "
+                     "never split into sub-layers. Empty means ratio mode.");
+    def->mode    = comDevelop;
+    def->set_default_value(new ConfigOptionStrings{""});
+
     // defined in bits
     // 0 means cannot support, 1 means support
     // 0 bit: can support in left extruder
@@ -9908,10 +9918,11 @@ std::map<std::string, std::string> validate(const FullPrintConfig &cfg, bool und
         const auto &gradient_flags = cfg.filament_mixed_gradient.values;
         const auto &range_strs     = cfg.filament_mixed_gradient_range.values;
         const auto &curve_strs     = cfg.filament_mixed_gradient_curve.values;
+        const auto &pattern_strs   = cfg.filament_mixed_pattern.values;
 
         std::map<std::string, std::string> mixed_errors = validate_mixed_filament_params(
             is_mixed, comp_strs, ratio_strs, gradient_flags,
-            range_strs, curve_strs);
+            range_strs, curve_strs, pattern_strs);
         for (const auto &kv : mixed_errors)
             if (error_message.find(kv.first) == error_message.end())
                 error_message.emplace(kv.first, kv.second);

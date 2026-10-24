@@ -122,6 +122,16 @@ void remap_mixed_components_on_delete(
     std::vector<std::string>         &comp_strs,
     unsigned int                      del_1based);
 
+// Remap cycle patterns after a physical filament is deleted (call before
+// remap_mixed_components_on_delete, while comp_strs still hold the old indices).
+// Steps above del_1based are decremented; a pattern that uses the deleted filament is
+// cleared, so the slot falls back to ratio mode instead of printing a wrong filament.
+void remap_mixed_patterns_on_delete(
+    const std::vector<unsigned char> &is_mixed,
+    const std::vector<std::string>   &comp_strs,
+    std::vector<std::string>         &pattern_strs,
+    unsigned int                      del_1based);
+
 // Check which mixed filament slots have type-mismatched components.
 // filament_types: type strings for physical filaments (0-based, size == num_physical).
 // Component IDs in comp_strs are 1-based; the function converts to 0-based to look up types.
@@ -148,6 +158,34 @@ void expand_mixed_slots_in_unprintables(
 // "curve needs >= 2 points" check. Clearing them falls back to the linear range.
 void sanitize_mixed_gradient_curve_array(std::vector<std::string>& vals);
 
+// ---- Cycle mode (Full Spectrum manual patterns) ----------------------------------
+// Ported from OrcaSlicer-FullSpectrum (MixedFilament/Pattern.cpp, Resolver.cpp), AGPL-3.0.
+//
+// A cycle pattern is an exact per-layer sequence of physical filaments for one mixed
+// slot. Groups separated by ',' are per-perimeter groups (outer wall first). Inside a
+// group, steps are separated by '/', ' ', '-' or '_'. A group without separators is read
+// one character per step (the compact Full Spectrum form, e.g. "1121"). Each step is a
+// 1-based physical filament index, or a letter A..Z naming the slot's components by
+// position (A = first component).
+
+// Parse `pattern` into groups of 1-based physical filament ids. An empty or all-blank
+// pattern yields no groups and succeeds. On failure returns false and sets `err`.
+bool parse_mixed_pattern(const std::string                       &pattern,
+                         const std::vector<unsigned int>         &components,
+                         std::vector<std::vector<unsigned int>>  &groups,
+                         std::string                             *err = nullptr);
+
+// Canonical text form of parsed groups ("1/1/2", groups joined by ',').
+std::string serialize_mixed_pattern(const std::vector<std::vector<unsigned int>> &groups);
+
+// Layer sequence used when the pattern is resolved per layer: all groups concatenated in
+// order (Full Spectrum mixed_filament_manual_pattern_sequence).
+std::vector<unsigned int> mixed_pattern_layer_sequence(const std::vector<std::vector<unsigned int>> &groups);
+
+// Physical filament (1-based) for `layer_index`, i.e. sequence[layer_index % size].
+// Returns 0 when the sequence is empty.
+unsigned int resolve_mixed_pattern(const std::vector<unsigned int> &sequence, size_t layer_index);
+
 // Validate mixed-color (混色) parameters. Returns error messages keyed by option name.
 // Slot details are included in the message text (1-based slot index).
 std::map<std::string, std::string> validate_mixed_filament_params(
@@ -156,7 +194,8 @@ std::map<std::string, std::string> validate_mixed_filament_params(
     const std::vector<std::string>   &ratio_strs,
     const std::vector<unsigned char> &gradient_flags,
     const std::vector<std::string>   &gradient_range_strs,
-    const std::vector<std::string>   &gradient_curve_strs);
+    const std::vector<std::string>   &gradient_curve_strs,
+    const std::vector<std::string>   &pattern_strs = {});
 
 } // namespace Slic3r
 

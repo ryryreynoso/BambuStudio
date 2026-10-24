@@ -4442,6 +4442,7 @@ size_t Sidebar::add_custom_filaments(const std::vector<std::pair<wxColour, std::
         rotate_strings("filament_mixed_gradient_range");
         rotate_strings("filament_mixed_gradient_curve");
         rotate_bools("filament_mixed_gradient_per_part");
+        rotate_strings("filament_mixed_pattern");
 
         if (ams_mc.size() > total)
             std::rotate(ams_mc.begin() + insert_pos, ams_mc.begin() + total, ams_mc.end());
@@ -5991,6 +5992,8 @@ static void ensure_mixed_gradient_options(DynamicPrintConfig& project_config)
         project_config.set_key_value("filament_mixed_gradient_curve", new ConfigOptionStrings({""}));
     if (!project_config.option("filament_mixed_gradient_per_part"))
         project_config.set_key_value("filament_mixed_gradient_per_part", new ConfigOptionBools({false}));
+    if (!project_config.option("filament_mixed_pattern"))
+        project_config.set_key_value("filament_mixed_pattern", new ConfigOptionStrings({""}));
 }
 
 static void write_mixed_filament_slot(
@@ -6268,6 +6271,8 @@ void Sidebar::edit_mixed_filament(size_t panel_idx)
             project_config.set_key_value("filament_mixed_gradient_curve", new ConfigOptionStrings({""}) );
         if (!project_config.option("filament_mixed_gradient_per_part"))
             project_config.set_key_value("filament_mixed_gradient_per_part", new ConfigOptionBools({false}));
+        if (!project_config.option("filament_mixed_pattern"))
+            project_config.set_key_value("filament_mixed_pattern", new ConfigOptionStrings({""}));
 
         {
             auto* grad_opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient");

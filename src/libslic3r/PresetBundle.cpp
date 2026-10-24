@@ -70,6 +70,7 @@ static std::vector<std::string> s_project_options {
     "filament_mixed_gradient_range",
     "filament_mixed_gradient_curve",
     "filament_mixed_gradient_per_part",
+    "filament_mixed_pattern",
     "has_filament_switcher"
 };
 
@@ -2196,6 +2197,16 @@ void PresetBundle::load_selections(AppConfig &config, const PresetPreferences& p
         }
         vals.resize(n_filaments, false);
     }
+    {
+        // Full Spectrum cycle patterns; old projects have none.
+        auto& vals = project_config.option<ConfigOptionStrings>("filament_mixed_pattern")->values;
+        if (config.has("presets", "filament_mixed_pattern")) {
+            std::vector<std::string> parts;
+            if (Slic3r::unescape_strings_cstyle(config.get("presets", "filament_mixed_pattern"), parts))
+                vals = std::move(parts);
+        }
+        vals.resize(n_filaments, std::string{});
+    }
 
     // Update visibility of presets based on their compatibility with the active printer.
     // Always try to select a compatible print and filament preset to the current printer preset,
@@ -2355,6 +2366,8 @@ void PresetBundle::export_selections(AppConfig &config)
         }
         config.set("presets", "filament_mixed_gradient_per_part", s);
     }
+    if (auto* opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern"))
+        config.set("presets", "filament_mixed_pattern", Slic3r::escape_strings_cstyle(opt->values));
 
     // BBS
     //config.set("presets", "sla_print",    sla_prints.get_selected_preset_name());
@@ -2403,6 +2416,8 @@ void PresetBundle::set_num_filaments(unsigned int n, std::string new_color)
         opt->values.resize(n, std::string{});
     if (auto* opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part"))
         opt->values.resize(n, false);
+    if (auto* opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern"))
+        opt->values.resize(n, std::string{});
 
     //BBS set new filament color to new_color
     if (old_filament_count < n) {
@@ -2472,9 +2487,13 @@ void PresetBundle::update_num_filaments(unsigned int to_del_flament_id)
         if (is_mixed_opt && comp_opt) {
             bool del_is_physical = (to_del_flament_id >= is_mixed_opt->values.size()
                                     || !is_mixed_opt->values[to_del_flament_id]);
-            if (del_is_physical)
+            if (del_is_physical) {
+                if (auto* pattern_opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern"))
+                    remap_mixed_patterns_on_delete(is_mixed_opt->values, comp_opt->values, pattern_opt->values,
+                                                   to_del_flament_id + 1);
                 remap_mixed_components_on_delete(is_mixed_opt->values, comp_opt->values,
                                                  to_del_flament_id + 1);
+            }
         }
         if (is_mixed_opt)
             erase_or_resize(is_mixed_opt->values);
@@ -2490,6 +2509,8 @@ void PresetBundle::update_num_filaments(unsigned int to_del_flament_id)
     if (auto* opt = project_config.option<ConfigOptionStrings>("filament_mixed_gradient_curve"))
         erase_or_resize(opt->values);
     if (auto* opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part"))
+        erase_or_resize(opt->values);
+    if (auto* opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern"))
         erase_or_resize(opt->values);
 
     update_multi_material_filament_presets(to_del_flament_id);
@@ -2715,6 +2736,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
         std::string mixed_gradient_range;
         std::string mixed_gradient_curve;
         bool        mixed_gradient_per_part = false;
+        std::string mixed_pattern;
     };
     std::vector<MixedSlotSnapshot> mixed_snapshots;
     auto* is_mixed_opt         = project_config.option<ConfigOptionBools>("filament_is_mixed");
@@ -2724,6 +2746,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
     auto* mixed_grad_range_opt = project_config.option<ConfigOptionStrings>("filament_mixed_gradient_range");
     auto* mixed_grad_curve_opt = project_config.option<ConfigOptionStrings>("filament_mixed_gradient_curve");
     auto* mixed_per_part_opt   = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part");
+    auto* mixed_pattern_opt    = project_config.option<ConfigOptionStrings>("filament_mixed_pattern");
     if (is_mixed_opt) {
         for (size_t i = 0; i < is_mixed_opt->values.size() && i < this->filament_presets.size(); ++i) {
             if (!is_mixed_opt->values[i])
@@ -2738,6 +2761,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
             if (mixed_grad_range_opt && i < mixed_grad_range_opt->values.size()) snap.mixed_gradient_range = mixed_grad_range_opt->values[i];
             if (mixed_grad_curve_opt && i < mixed_grad_curve_opt->values.size()) snap.mixed_gradient_curve = mixed_grad_curve_opt->values[i];
             if (mixed_per_part_opt && i < mixed_per_part_opt->values.size()) snap.mixed_gradient_per_part = mixed_per_part_opt->values[i];
+            if (mixed_pattern_opt && i < mixed_pattern_opt->values.size()) snap.mixed_pattern = mixed_pattern_opt->values[i];
             mixed_snapshots.push_back(snap);
         }
         if (!mixed_snapshots.empty()) {
@@ -2754,6 +2778,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
             if (mixed_grad_range_opt) mixed_grad_range_opt->values.resize(phys_count);
             if (mixed_grad_curve_opt) mixed_grad_curve_opt->values.resize(phys_count);
             if (mixed_per_part_opt)   mixed_per_part_opt->values.resize(phys_count);
+            if (mixed_pattern_opt)    mixed_pattern_opt->values.resize(phys_count);
         }
     }
 
@@ -2903,6 +2928,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
         if (mixed_grad_range_opt) mixed_grad_range_opt->values.resize(new_phys_count);
         if (mixed_grad_curve_opt) mixed_grad_curve_opt->values.resize(new_phys_count);
         if (mixed_per_part_opt)   mixed_per_part_opt->values.resize(new_phys_count, (unsigned char)false);
+        if (mixed_pattern_opt)    mixed_pattern_opt->values.resize(new_phys_count);
 
         for (auto& snap : mixed_snapshots) {
             this->filament_presets.push_back(snap.preset);
@@ -2917,6 +2943,7 @@ unsigned int PresetBundle::sync_ams_list(std::vector<std::pair<DynamicPrintConfi
             if (mixed_grad_range_opt) mixed_grad_range_opt->values.push_back(snap.mixed_gradient_range);
             if (mixed_grad_curve_opt) mixed_grad_curve_opt->values.push_back(snap.mixed_gradient_curve);
             if (mixed_per_part_opt)   mixed_per_part_opt->values.push_back((unsigned char)snap.mixed_gradient_per_part);
+            if (mixed_pattern_opt)    mixed_pattern_opt->values.push_back(snap.mixed_pattern);
         }
     }
 

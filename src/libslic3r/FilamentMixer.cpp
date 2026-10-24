@@ -501,6 +501,33 @@ void remap_mixed_components_on_delete(
     }
 }
 
+void remap_mixed_patterns_on_delete(
+    const std::vector<unsigned char> &is_mixed,
+    const std::vector<std::string>   &comp_strs,
+    std::vector<std::string>         &pattern_strs,
+    unsigned int                      del_1based)
+{
+    for (size_t i = 0; i < is_mixed.size() && i < pattern_strs.size(); ++i) {
+        if (!is_mixed[i] || pattern_strs[i].empty())
+            continue;
+        const auto comps = parse_mixed_components(i < comp_strs.size() ? comp_strs[i] : "");
+        std::vector<std::vector<unsigned int>> groups;
+        if (!parse_mixed_pattern(pattern_strs[i], comps, groups)) {
+            pattern_strs[i].clear();
+            continue;
+        }
+        bool references_deleted = false;
+        for (auto &group : groups)
+            for (unsigned int &id : group) {
+                if (id == del_1based)
+                    references_deleted = true;
+                else if (id > del_1based)
+                    --id;
+            }
+        pattern_strs[i] = references_deleted ? std::string() : serialize_mixed_pattern(groups);
+    }
+}
+
 std::vector<size_t> check_mixed_filament_type_consistency(
     const std::vector<unsigned char> &is_mixed,
     const std::vector<std::string>   &comp_strs,
@@ -718,13 +745,121 @@ static void check_mixed_array_size_required(std::map<std::string, std::string> &
     }
 }
 
+static bool is_mixed_pattern_separator(char c)
+{
+    return c == '/' || c == ' ' || c == '\t' || c == '-' || c == '_';
+}
+
+bool parse_mixed_pattern(const std::string                      &pattern,
+                         const std::vector<unsigned int>        &components,
+                         std::vector<std::vector<unsigned int>> &groups,
+                         std::string                            *err)
+{
+    groups.clear();
+    auto fail = [&](const std::string &msg) {
+        groups.clear();
+        if (err)
+            *err = msg;
+        return false;
+    };
+
+    // Resolve one step token to a 1-based physical id: a decimal index, or a component letter.
+    auto step_to_id = [&](const std::string &tok, unsigned int &out) -> bool {
+        if (tok.size() == 1 && std::isalpha(static_cast<unsigned char>(tok[0]))) {
+            const size_t pos = static_cast<size_t>(std::toupper(static_cast<unsigned char>(tok[0])) - 'A');
+            if (pos >= components.size())
+                return false;
+            out = components[pos];
+            return out > 0;
+        }
+        if (tok.empty() || tok.size() > 3 || !std::all_of(tok.begin(), tok.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }))
+            return false;
+        out = static_cast<unsigned int>(std::stoul(tok));
+        return out > 0;
+    };
+
+    if (std::all_of(pattern.begin(), pattern.end(), [](char c) { return std::isspace(static_cast<unsigned char>(c)); }))
+        return true;
+
+    size_t group_start = 0;
+    while (group_start <= pattern.size()) {
+        size_t group_end = pattern.find(',', group_start);
+        if (group_end == std::string::npos)
+            group_end = pattern.size();
+        const std::string group_str = pattern.substr(group_start, group_end - group_start);
+
+        std::vector<std::string> tokens;
+        const bool has_separator = std::any_of(group_str.begin(), group_str.end(), is_mixed_pattern_separator);
+        if (has_separator) {
+            std::string cur;
+            for (char c : group_str) {
+                if (is_mixed_pattern_separator(c)) {
+                    if (!cur.empty())
+                        tokens.emplace_back(std::move(cur));
+                    cur.clear();
+                } else {
+                    cur.push_back(c);
+                }
+            }
+            if (!cur.empty())
+                tokens.emplace_back(std::move(cur));
+        } else {
+            // Compact Full Spectrum form: one character per step.
+            for (char c : group_str)
+                tokens.emplace_back(1, c);
+        }
+        if (tokens.empty())
+            return fail("empty pattern group");
+
+        std::vector<unsigned int> group;
+        for (const std::string &tok : tokens) {
+            unsigned int id = 0;
+            if (!step_to_id(tok, id))
+                return fail("invalid pattern step \"" + tok + "\"");
+            group.push_back(id);
+        }
+        groups.emplace_back(std::move(group));
+        group_start = group_end + 1;
+    }
+    return true;
+}
+
+std::string serialize_mixed_pattern(const std::vector<std::vector<unsigned int>> &groups)
+{
+    std::string out;
+    for (size_t g = 0; g < groups.size(); ++g) {
+        if (g > 0)
+            out += ',';
+        for (size_t s = 0; s < groups[g].size(); ++s) {
+            if (s > 0)
+                out += '/';
+            out += std::to_string(groups[g][s]);
+        }
+    }
+    return out;
+}
+
+std::vector<unsigned int> mixed_pattern_layer_sequence(const std::vector<std::vector<unsigned int>> &groups)
+{
+    std::vector<unsigned int> sequence;
+    for (const auto &group : groups)
+        sequence.insert(sequence.end(), group.begin(), group.end());
+    return sequence;
+}
+
+unsigned int resolve_mixed_pattern(const std::vector<unsigned int> &sequence, size_t layer_index)
+{
+    return sequence.empty() ? 0 : sequence[layer_index % sequence.size()];
+}
+
 std::map<std::string, std::string> validate_mixed_filament_params(
     const std::vector<unsigned char> &is_mixed,
     const std::vector<std::string>   &comp_strs,
     const std::vector<std::string>   &ratio_strs,
     const std::vector<unsigned char> &gradient_flags,
     const std::vector<std::string>   &gradient_range_strs,
-    const std::vector<std::string>   &gradient_curve_strs)
+    const std::vector<std::string>   &gradient_curve_strs,
+    const std::vector<std::string>   &pattern_strs)
 {
     std::map<std::string, std::string> errors;
 
@@ -820,6 +955,29 @@ std::map<std::string, std::string> validate_mixed_filament_params(
                 if (!curve_str.empty() && parse_gradient_curve(curve_str).empty())
                     append_error(errors, "filament_mixed_gradient_curve",
                            slot + ": invalid curve (need at least 2 valid control points)");
+            }
+        }
+
+        const std::string pattern_str = i < pattern_strs.size() ? pattern_strs[i] : "";
+        std::vector<std::vector<unsigned int>> pattern_groups;
+        std::string pattern_err;
+        if (!parse_mixed_pattern(pattern_str, components, pattern_groups, &pattern_err)) {
+            append_error(errors, "filament_mixed_pattern", slot + ": " + pattern_err);
+        } else if (!pattern_groups.empty()) {
+            if (gradient_on)
+                append_error(errors, "filament_mixed_pattern", slot + ": a cycle pattern cannot be combined with gradient mode");
+            // Per-perimeter groups need per-wall tool assignment in the G-code generator,
+            // which is not ported yet. Reject them instead of silently flattening.
+            if (pattern_groups.size() > 1)
+                append_error(errors, "filament_mixed_pattern", slot + ": per-perimeter pattern groups (',') are not supported yet");
+            // Every step must be one of the slot's components: filament grouping, nozzle
+            // mapping and unprintable-area checks are all derived from the component list.
+            for (unsigned int id : mixed_pattern_layer_sequence(pattern_groups)) {
+                if (std::find(components.begin(), components.end(), id) == components.end()) {
+                    append_error(errors, "filament_mixed_pattern",
+                                 slot + ": pattern step " + std::to_string(id) + " is not a component of this mixed filament");
+                    break;
+                }
             }
         }
     }

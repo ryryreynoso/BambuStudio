@@ -2156,7 +2156,9 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
         std::vector<unsigned int> components; // 1-based
         std::vector<double>       ratios;
         std::vector<long long>    accum;     // deficit accumulator (integer, unit: 1e-6 mm)
+        std::vector<unsigned int> pattern;   // cycle mode: exact per-layer sequence, 1-based; empty = ratio mode
     };
+    const auto &pattern_strs = config.filament_mixed_pattern.values;
     std::vector<SlotInfo> slots(is_mixed.size());
     for (size_t i = 0; i < is_mixed.size(); ++i) {
         if (!is_mixed[i])
@@ -2186,7 +2188,40 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                 for (double &r : slots[i].ratios) r /= sum;
         }
         slots[i].accum.assign(slots[i].components.size(), 0LL);
+
+        // Cycle mode. Invalid patterns are rejected by validate(); here they fall back to ratio mode.
+        std::vector<std::vector<unsigned int>> pattern_groups;
+        if (i < pattern_strs.size() &&
+            parse_mixed_pattern(pattern_strs[i], slots[i].components, pattern_groups) &&
+            pattern_groups.size() == 1) {
+            std::vector<unsigned int> seq = mixed_pattern_layer_sequence(pattern_groups);
+            const bool all_components = std::all_of(seq.begin(), seq.end(), [&](unsigned int id) {
+                return std::find(slots[i].components.begin(), slots[i].components.end(), id) != slots[i].components.end();
+            });
+            if (all_components)
+                slots[i].pattern = std::move(seq);
+        }
     }
+
+    // Object-local layer index used by cycle patterns, matching Full Spectrum, which counts
+    // pattern steps from the object's own layer index rather than the global one. When several
+    // objects use the slot on the same layer, the smallest local index wins (deterministic).
+    auto pattern_layer_index = [&](unsigned int ext, size_t layer_idx) -> size_t {
+        size_t best = std::numeric_limits<size_t>::max();
+        auto slot_it = m_mixed_object_layers.find(ext);
+        if (slot_it != m_mixed_object_layers.end()) {
+            for (const auto &[obj, _] : slot_it->second) {
+                auto all_it = m_object_all_layer_indices.find(obj);
+                if (all_it == m_object_all_layer_indices.end())
+                    continue;
+                const std::vector<size_t> &obj_layers = all_it->second;
+                auto pos = std::lower_bound(obj_layers.begin(), obj_layers.end(), layer_idx);
+                if (pos != obj_layers.end() && *pos == layer_idx)
+                    best = std::min(best, static_cast<size_t>(pos - obj_layers.begin()));
+            }
+        }
+        return best == std::numeric_limits<size_t>::max() ? layer_idx : best;
+    };
 
     // Parse gradient settings per slot
     const auto &gradient_flags = config.filament_mixed_gradient.values;
@@ -2416,6 +2451,16 @@ void ToolOrdering::resolve_mixed_filaments(const PrintConfig &config)
                 continue;
             }
             auto &s = slots[ext];
+
+            // Cycle mode: the pattern fixes the physical filament of every layer and is never
+            // split into sub-layers (Full Spectrum mixed_filament_definition_uses_local_z).
+            if (!s.pattern.empty()) {
+                const unsigned int resolved = resolve_mixed_pattern(s.pattern, pattern_layer_index(ext, layer_idx)) - 1;
+                lt.mixed_filament_resolution[ext] = resolved;
+                new_extruders.push_back(resolved);
+                prev_print_z_for_slot[ext] = lt.print_z;
+                continue;
+            }
 
             // Skip sublayer splitting for the first layer to preserve bed adhesion.
             if (sublayer_enabled && layer_idx > 0) {

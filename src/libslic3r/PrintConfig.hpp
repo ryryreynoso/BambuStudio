@@ -1313,6 +1313,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     ((ConfigOptionStrings,             filament_mixed_gradient_range))
     ((ConfigOptionStrings,             filament_mixed_gradient_curve))
     ((ConfigOptionBools,               filament_mixed_gradient_per_part))
+    ((ConfigOptionStrings,             filament_mixed_pattern))
     ((ConfigOptionInts,                filament_printable))
     ((ConfigOptionInts,                filament_extruder_compatibility))
     ((ConfigOptionEnumsGeneric,        filament_scarf_seam_type))
