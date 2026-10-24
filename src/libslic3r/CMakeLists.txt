@@ -262,6 +262,8 @@ set(lisbslic3r_sources
     ModelArrange.cpp
     MultiMaterialSegmentation.cpp
     MultiMaterialSegmentation.hpp
+    Format/FullSpectrumProjectImport.cpp
+    Format/FullSpectrumProjectImport.hpp
     # Full Spectrum core, vendored from OrcaSlicer-FullSpectrum (AGPL-3.0), namespace Slic3r::FullSpectrum
     FullSpectrum/FullSpectrumICCPolynomialEstimator.cpp
     FullSpectrum/FullSpectrumICCPolynomialEstimator.hpp
