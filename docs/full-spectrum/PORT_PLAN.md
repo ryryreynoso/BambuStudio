@@ -162,6 +162,21 @@ color catalogue (`FilamentColorLibrary`), Snapmaker device code, U1 profiles.
   (flattened by `flatten_bbl_preset.py`) and checks the filament printed on every layer, and runs
   the before/after regression against an unmodified build.
 
+### Results (Linux build of this branch, 2026-10-24)
+
+* `full_spectrum_tests` against the real libslic3r: **83 test cases, 26,327 assertions, all pass**
+  (includes the 64 ported upstream Full Spectrum core cases).
+* Cycle mode, X1 Carbon 0.4 + Bambu PLA Basic, 20 mm cube on a `1/1/2` slot: all 100 layers print
+  the prescribed filament; 66 filament changes, each through the profile's `M620`/`M621` AMS block.
+* Sub-layers with a 0.06 mm minimum, 75/25 mix at 0.20 mm: passes of 0.14 mm and 0.06 mm (layer 0
+  unsplit), matching Full Spectrum's documented example.
+* Regression: plain single-filament prints on filament 1 and 2 are byte-identical to the unmodified
+  baseline apart from the two new keys in the config block, whenever both runs produce the same
+  variant. Bambu Studio's own output varies slightly between runs (feedrate/slow-down lines), for
+  the baseline as well as this branch, so single runs can differ in those lines.
+* The GUI (dialog row, change estimate, project import notification) compiles but has not been
+  exercised interactively; no physical prints have been made.
+
 ## 8. Bambu AMS adaptation
 
 On the U1 a filament change is a cheap tool swap. On Bambu printers it is an AMS swap: cut,
