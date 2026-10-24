@@ -108,24 +108,36 @@ def layers_and_tools(gcode_path):
     return layers, tool_changes, m620
 
 
-def mixed_args(n_physical, components, ratios="", pattern="", gradient=False, gradient_range=""):
-    """CLI options declaring one mixed slot after n_physical physical filaments."""
+def mixed_settings(n_physical, components, ratios="", pattern="", gradient=False, gradient_range=""):
+    """Project keys declaring one mixed slot after n_physical physical filaments. The CLI only
+    accepts its own options, so these are merged into the process settings file."""
     def strings(last):
-        return ";".join(['""'] * n_physical + ['"%s"' % last])
-    return ["--filament_is_mixed", ",".join(["0"] * n_physical + ["1"]),
-            "--filament_mixed_components", strings(components),
-            "--filament_mixed_sublayer_ratios", strings(ratios),
-            "--filament_mixed_gradient", ",".join(["0"] * n_physical + ["1" if gradient else "0"]),
-            "--filament_mixed_gradient_range", strings(gradient_range),
-            "--filament_mixed_gradient_curve", strings(""),
-            "--filament_mixed_gradient_per_part", ",".join(["0"] * (n_physical + 1)),
-            "--filament_mixed_pattern", strings(pattern)]
+        return [""] * n_physical + [last]
+    def bools(last):
+        return ["0"] * n_physical + ["1" if last else "0"]
+    return {"filament_is_mixed": bools(True),
+            "filament_mixed_components": strings(components),
+            "filament_mixed_sublayer_ratios": strings(ratios),
+            "filament_mixed_gradient": bools(gradient),
+            "filament_mixed_gradient_range": strings(gradient_range),
+            "filament_mixed_gradient_curve": strings(""),
+            "filament_mixed_gradient_per_part": bools(False),
+            "filament_mixed_pattern": strings(pattern)}
+
+
+def with_settings(process, extra):
+    data = json.load(open(process))
+    # The CLI does not place the prime tower for a bare STL; its default position ends up off
+    # the bed and the G-code check rejects the plate. Purge into the printer's chute instead.
+    data["enable_prime_tower"] = "0"
+    data.update(extra)
+    json.dump(data, open(process, "w"), indent=2)
 
 
 def check_cycle(binary, workdir):
     machine, process, filaments, cube = prepare(workdir, ["#FF0000", "#0000FF", "#800080"])
-    gcode = slice_(binary, workdir, machine, process, filaments, cube, 3,
-                   mixed_args(2, "1,2", "0.6667,0.3333", pattern="1/1/2"))
+    with_settings(process, mixed_settings(2, "1,2", "0.6667,0.3333", pattern="1/1/2"))
+    gcode = slice_(binary, workdir, machine, process, filaments, cube, 3, [])
     layers, changes, m620 = layers_and_tools(gcode)
     expected = [0, 0, 1]  # T indices are 0-based: filament 1 -> T0
     bad = []
@@ -143,9 +155,10 @@ def check_cycle(binary, workdir):
 
 def check_sublayer(binary, workdir):
     machine, process, filaments, cube = prepare(workdir, ["#FF0000", "#0000FF", "#800080"])
-    gcode = slice_(binary, workdir, machine, process, filaments, cube, 3,
-                   mixed_args(2, "1,2", "0.7500,0.2500") +
-                   ["--enable_mixed_color_sublayer", "1", "--mixed_color_sublayer_min_height", "0.06"])
+    extra = mixed_settings(2, "1,2", "0.7500,0.2500")
+    extra.update({"enable_mixed_color_sublayer": "1", "mixed_color_sublayer_min_height": "0.06"})
+    with_settings(process, extra)
+    gcode = slice_(binary, workdir, machine, process, filaments, cube, 3, [])
     layers, changes, m620 = layers_and_tools(gcode)
     print("layers: %d, tool changes: %d, AMS change blocks: %d" % (len(layers), changes, m620))
     print("first layers:", [(z, t) for z, t in layers[:6]])
