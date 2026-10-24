@@ -262,6 +262,31 @@ set(lisbslic3r_sources
     ModelArrange.cpp
     MultiMaterialSegmentation.cpp
     MultiMaterialSegmentation.hpp
+    # Full Spectrum core, vendored from OrcaSlicer-FullSpectrum (AGPL-3.0), namespace Slic3r::FullSpectrum
+    FullSpectrum/FullSpectrumICCPolynomialEstimator.cpp
+    FullSpectrum/FullSpectrumICCPolynomialEstimator.hpp
+    FullSpectrum/FullSpectrumICCPolynomialProfile.h
+    FullSpectrum/FullSpectrumKSPairResidual.cpp
+    FullSpectrum/FullSpectrumKSPairResidual.hpp
+    FullSpectrum/FullSpectrumMaterialDatabaseProfile.h
+    FullSpectrum/FullSpectrumMaterialHigherOrderProfile.h
+    FullSpectrum/MixedFilament.cpp
+    FullSpectrum/MixedFilament.hpp
+    FullSpectrum/MixedFilament/ColorNames.cpp
+    FullSpectrum/MixedFilament/ColorNames.hpp
+    FullSpectrum/MixedFilament/Common.cpp
+    FullSpectrum/MixedFilament/Definition.cpp
+    FullSpectrum/MixedFilament/Display.cpp
+    FullSpectrum/MixedFilament/Gradient.cpp
+    FullSpectrum/MixedFilament/GradientPreview.cpp
+    FullSpectrum/MixedFilament/Internal.hpp
+    FullSpectrum/MixedFilament/LegacyRow.cpp
+    FullSpectrum/MixedFilament/Manager.cpp
+    FullSpectrum/MixedFilament/Pattern.cpp
+    FullSpectrum/MixedFilament/PerimeterModulation.cpp
+    FullSpectrum/MixedFilament/PerimeterModulation.hpp
+    FullSpectrum/MixedFilament/Preview.cpp
+    FullSpectrum/MixedFilament/Resolver.cpp
     Measure.hpp
     Measure.cpp
     MeasureUtils.hpp
