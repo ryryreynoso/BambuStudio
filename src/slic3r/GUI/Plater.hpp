@@ -276,6 +276,8 @@ public:
 
     // Mixed Filament sidebar
     void add_mixed_filament();
+    // Convert Full Spectrum mixed filaments stored in a loaded 3MF project into native slots.
+    void import_full_spectrum_mixed_filaments(const std::string &path_3mf);
     void edit_mixed_filament(size_t idx);
     void delete_mixed_filament_at(size_t idx);
     void decompose_filament_color(int filament_idx);

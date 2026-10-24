@@ -37,6 +37,11 @@ struct MixedFilamentResult {
     // Empty -> use linear (gradient_direction). Non-empty -> cubic Hermite over [0,1]^2
     // with optional per-anchor tangent overrides (see GradientAnchor).
     std::vector<GradientAnchor> gradient_curve;
+    // Full Spectrum cycle mode: exact per-layer sequence (filament_mixed_pattern). Empty = ratio mode.
+    std::string cycle_pattern;
+    // Explicit gradient range "start,end" of the first component; when set it replaces the
+    // 90/10 range implied by gradient_direction (used for imported Full Spectrum gradients).
+    std::string gradient_range;
 };
 
 class MixedFilamentDialog : public DPIDialog

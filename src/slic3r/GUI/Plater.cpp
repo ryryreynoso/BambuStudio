@@ -82,6 +82,7 @@
 #include "WipeTowerPlacement.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Format/FullSpectrumProjectImport.hpp"
 #include "libslic3r/FilamentMixer.hpp"
 #include "libslic3r/LocalesUtils.hpp"
 #include "libslic3r/SLAPrint.hpp"
@@ -6055,7 +6056,7 @@ static void write_mixed_filament_slot(
         while (grad_range_opt->values.size() <= new_idx) grad_range_opt->values.push_back("");
         if (result.gradient_enabled && result.components.size() == 2) {
             const char* fmt = (result.gradient_direction == 0) ? "0.9000,0.1000" : "0.1000,0.9000";
-            grad_range_opt->values[new_idx] = fmt;
+            grad_range_opt->values[new_idx] = result.gradient_range.empty() ? std::string(fmt) : result.gradient_range;
         } else {
             grad_range_opt->values[new_idx] = "";
         }
@@ -6067,6 +6068,10 @@ static void write_mixed_filament_slot(
     if (auto* per_part_opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part")) {
         while (per_part_opt->values.size() <= new_idx) per_part_opt->values.push_back(false);
         per_part_opt->values[new_idx] = result.gradient_enabled && result.per_part_gradient;
+    }
+    if (auto* pattern_opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern")) {
+        while (pattern_opt->values.size() <= new_idx) pattern_opt->values.push_back("");
+        pattern_opt->values[new_idx] = result.cycle_pattern;
     }
 
     auto& presets = wxGetApp().preset_bundle->filament_presets;
@@ -6159,6 +6164,68 @@ void Sidebar::add_mixed_filament()
     }
 }
 
+void Sidebar::import_full_spectrum_mixed_filaments(const std::string &path_3mf)
+{
+    FullSpectrumProjectSettings settings;
+    std::vector<std::string>    fs_colours;
+    if (!read_full_spectrum_project_settings(path_3mf, settings, fs_colours))
+        return;
+
+    auto *bundle = wxGetApp().preset_bundle;
+    // A project that already has native mixed slots was saved by Bambu Studio after an import.
+    if (auto *is_mixed = bundle->project_config.option<ConfigOptionBools>("filament_is_mixed"); is_mixed && has_any_mixed_filament(is_mixed->values))
+        return;
+
+    std::vector<std::string> color_strs, names, types;
+    collect_physical_filament_info(color_strs, names, types);
+    auto *notify = wxGetApp().plater()->get_notification_manager();
+    if (!fs_colours.empty() && fs_colours.size() != color_strs.size()) {
+        notify->push_notification(NotificationType::CustomNotification, NotificationManager::NotificationLevel::WarningNotificationLevel,
+                                  _u8L("Full Spectrum mixed filaments were not imported: the project's physical filament count changed while loading."));
+        return;
+    }
+
+    const size_t total     = bundle->filament_presets.size();
+    const size_t max_n     = size_t(EnforcerBlockerType::ExtruderMax);
+    const size_t max_slots = total < max_n ? max_n - total : 0;
+    const FullSpectrumImportResult res = convert_full_spectrum_mixed_filaments(settings, color_strs, max_slots);
+    if (res.slots.empty())
+        return;
+
+    std::vector<MixedFilamentResult> results;
+    for (const FullSpectrumNativeSlot &slot : res.slots) {
+        MixedFilamentResult r;
+        r.components = parse_mixed_components(slot.components);
+        CNumericLocalesSetter c_locale_setter;
+        for (double ratio : parse_mixed_ratios(slot.ratios, r.components.size()))
+            r.ratios.push_back(std::max(1, int(std::lround(ratio * 100.))));
+        r.cycle_pattern    = slot.pattern;
+        r.gradient_enabled = slot.gradient;
+        r.gradient_range   = slot.gradient_range;
+        results.push_back(std::move(r));
+    }
+    const std::vector<int> created = create_mixed_filaments_from_results(this, results, color_strs);
+    const size_t           n_created = size_t(std::count_if(created.begin(), created.end(), [](int idx) { return idx >= 0; }));
+
+    if (res.needs_sublayers) {
+        DynamicPrintConfig new_conf;
+        new_conf.set_key_value("enable_mixed_color_sublayer", new ConfigOptionBool(true));
+        new_conf.set_key_value("mixed_color_sublayer_min_height", new ConfigOptionFloat(res.min_sublayer_height));
+        wxGetApp().get_tab(Preset::TYPE_PRINT)->load_config(new_conf);
+    }
+
+    std::string text = (boost::format(_u8L("Imported %1% Full Spectrum mixed filament(s) as native mixed filaments.")) % n_created).str();
+    if (res.needs_sublayers)
+        text += " " + _u8L("Mixed color sublayers were enabled.");
+    for (const std::string &w : res.warnings)
+        text += "\n" + w;
+    notify->push_notification(NotificationType::CustomNotification,
+                              res.warnings.empty() ? NotificationManager::NotificationLevel::RegularNotificationLevel :
+                                                     NotificationManager::NotificationLevel::WarningNotificationLevel,
+                              text);
+    BOOST_LOG_TRIVIAL(info) << "Full Spectrum import: " << n_created << " slot(s) from " << PathSanitizer::sanitize(path_3mf) << "; " << text;
+}
+
 void Sidebar::edit_mixed_filament(size_t panel_idx)
 {
     auto* plater = dynamic_cast<Plater*>(GetParent());
@@ -6231,11 +6298,24 @@ void Sidebar::edit_mixed_filament(size_t panel_idx)
     auto* per_part_opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part");
     if (existing.gradient_enabled && per_part_opt && cfg_idx < per_part_opt->values.size())
         existing.per_part_gradient = per_part_opt->values[cfg_idx];
+    if (existing.gradient_enabled && grad_range_opt && cfg_idx < grad_range_opt->values.size())
+        existing.gradient_range = grad_range_opt->values[cfg_idx];
+    if (auto* pattern_opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern"); pattern_opt && cfg_idx < pattern_opt->values.size())
+        existing.cycle_pattern = pattern_opt->values[cfg_idx];
 
     MixedFilamentDialog dlg(this, existing, color_strs, names, types);
     if (dlg.ShowModal() == wxID_OK) {
         auto result = dlg.get_result();
         if (result.components.size() < 2 || result.ratios.size() < 2) return;
+        // The dialog does not edit cycle patterns or explicit gradient ranges yet: keep them
+        // while the components (and the gradient direction) are unchanged.
+        if (result.components == existing.components) {
+            if (result.cycle_pattern.empty() && !result.gradient_enabled)
+                result.cycle_pattern = existing.cycle_pattern;
+            if (result.gradient_range.empty() && result.gradient_enabled && existing.gradient_enabled &&
+                result.gradient_direction == existing.gradient_direction && result.gradient_curve.empty())
+                result.gradient_range = existing.gradient_range;
+        }
 
         // Serialize components
         std::string comp_str;
@@ -6284,7 +6364,7 @@ void Sidebar::edit_mixed_filament(size_t panel_idx)
             while (grad_range_opt->values.size() <= cfg_idx) grad_range_opt->values.push_back("");
             if (result.gradient_enabled && result.components.size() == 2) {
                 const char* fmt = (result.gradient_direction == 0) ? "0.9000,0.1000" : "0.1000,0.9000";
-                grad_range_opt->values[cfg_idx] = fmt;
+                grad_range_opt->values[cfg_idx] = result.gradient_range.empty() ? std::string(fmt) : result.gradient_range;
             } else {
                 grad_range_opt->values[cfg_idx] = "";
             }
@@ -6298,6 +6378,11 @@ void Sidebar::edit_mixed_filament(size_t panel_idx)
             auto* per_part_opt = project_config.option<ConfigOptionBools>("filament_mixed_gradient_per_part");
             while (per_part_opt->values.size() <= cfg_idx) per_part_opt->values.push_back(false);
             per_part_opt->values[cfg_idx] = result.gradient_enabled && result.per_part_gradient;
+        }
+        {
+            auto* pattern_opt = project_config.option<ConfigOptionStrings>("filament_mixed_pattern");
+            while (pattern_opt->values.size() <= cfg_idx) pattern_opt->values.push_back("");
+            pattern_opt->values[cfg_idx] = result.cycle_pattern;
         }
 
         // Compute blended color
@@ -9037,6 +9122,13 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
 
                             preset_bundle->load_config_model(filename.string(), std::move(config), file_version);
                             // BBS: do not change extruder nozzle stat when loading 3mf
+
+                            // Full Spectrum projects keep their mixes in keys Bambu Studio does not load;
+                            // convert them to native mixed filaments once loading has finished.
+                            if (!boost::algorithm::ends_with(filename.string(), ".gcode.3mf")) {
+                                const std::string project_path = filename.string();
+                                q->CallAfter([this, project_path]() { sidebar->import_full_spectrum_mixed_filaments(project_path); });
+                            }
 
                             ConfigOption* bed_type_opt = preset_bundle->project_config.option("curr_bed_type");
                             if (bed_type_opt != nullptr) {
