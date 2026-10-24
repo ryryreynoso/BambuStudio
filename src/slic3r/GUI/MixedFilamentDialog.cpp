@@ -1312,7 +1312,36 @@ wxBoxSizer* MixedFilamentDialog::create_cycle_section()
     });
     outer->Add(m_cycle_strip, 0, wxEXPAND | wxTOP, FromDIP(4));
     m_cycle_strip->Show(!m_result.cycle_pattern.empty());
+
+    m_change_estimate = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    m_change_estimate->SetFont(::Label::Body_10);
+    m_change_estimate->SetForegroundColour(StateColor::darkModeColorFor(wxColour("#6B6B6B")));
+    m_change_estimate->SetToolTip(_L("On AMS printers every filament change unloads, loads and purges filament. "
+                                     "This is an estimate for this mix alone; the slicing summary shows the exact totals."));
+    outer->Add(m_change_estimate, 0, wxEXPAND | wxTOP, FromDIP(4));
     return outer;
+}
+
+void MixedFilamentDialog::update_change_estimate()
+{
+    if (!m_change_estimate)
+        return;
+    const auto &print_cfg   = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+    const auto &printer_cfg = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+    const bool  sublayers   = m_result.cycle_pattern.empty() &&
+                              (m_result.gradient_enabled || print_cfg.opt_bool("enable_mixed_color_sublayer"));
+    std::vector<double> ratios;
+    for (int r : m_result.ratios)
+        ratios.push_back(r / 100.);
+    const double per_layer = Slic3r::estimate_mixed_changes_per_layer(m_result.components, ratios, m_result.cycle_pattern, sublayers);
+    wxString text = wxString::Format(_L("About %.1f filament changes per layer"), per_layer);
+    double change_s = 0.;
+    for (const char *key : {"machine_load_filament_time", "machine_unload_filament_time"})
+        if (printer_cfg.has(key))
+            change_s += printer_cfg.opt_float(key);
+    if (change_s > 0. && per_layer > 0.)
+        text += wxString::Format(_L(" (about %d min per 100 layers for load and unload)"), int(std::lround(per_layer * 100. * change_s / 60.)));
+    m_change_estimate->SetLabel(text);
 }
 
 void MixedFilamentDialog::validate_cycle_pattern()
@@ -1865,6 +1894,7 @@ void MixedFilamentDialog::update_preview()
     if (m_summary_panel)   m_summary_panel->Refresh();
     if (m_ratio_bar)       m_ratio_bar->Refresh();
     if (m_triangle_panel)  m_triangle_panel->Refresh();
+    update_change_estimate();
 }
 
 void MixedFilamentDialog::paint_warning_panel(wxPaintEvent&)
@@ -1933,6 +1963,7 @@ void MixedFilamentDialog::update_ok_button_state()
     if (!m_btn_ok) return;
 
     validate_cycle_pattern();
+    update_change_estimate();
     const bool cycle_active = !m_result.cycle_pattern.empty();
     if (m_cycle_input) {
         m_cycle_input->SetForegroundColour(m_cycle_error.empty() ? StateColor::darkModeColorFor(wxColour("#262E30")) : wxColour("#E14747"));

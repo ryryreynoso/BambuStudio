@@ -198,6 +198,19 @@ unsigned int resolve_mixed_pattern(const std::vector<unsigned int> &sequence, si
 // min_height <= 0 returns the input unchanged.
 std::vector<double> clamp_mixed_sublayer_heights(const std::vector<double> &heights, double min_height);
 
+// ---- AMS cost hint ------------------------------------------------------------------
+// Average filament changes per layer that one mixed slot causes when printed on its own.
+// On AMS printers every change unloads, loads and purges filament, so this is shown while a
+// recipe is designed; the slicing summary reports exact totals.
+//  * cycle pattern: changes between consecutive steps of the repeating sequence;
+//  * sub-layers (ratio mode or gradient): every component prints on every layer, so about
+//    one change per component and layer;
+//  * plain ratio alternation: simulated with the same deficit round-robin ToolOrdering uses.
+double estimate_mixed_changes_per_layer(const std::vector<unsigned int> &components,
+                                        const std::vector<double>       &ratios,
+                                        const std::string               &pattern,
+                                        bool                             sublayers);
+
 // Validate mixed-color (混色) parameters. Returns error messages keyed by option name.
 // Slot details are included in the message text (1-based slot index).
 std::map<std::string, std::string> validate_mixed_filament_params(

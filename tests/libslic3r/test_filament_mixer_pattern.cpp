@@ -127,3 +127,17 @@ TEST_CASE("Cycle patterns follow physical filament deletion", "[FilamentMixer][F
         REQUIRE(patterns[4].empty());
     }
 }
+
+TEST_CASE("AMS filament change estimate", "[FilamentMixer][FullSpectrum]")
+{
+    const std::vector<unsigned int> comps{1, 2};
+    // Cycle "AAB": changes A->B and B->A once per three layers.
+    REQUIRE(estimate_mixed_changes_per_layer(comps, {0.67, 0.33}, "AAB", false) == Approx(2. / 3.));
+    // Sub-layers print every component on every layer.
+    REQUIRE(estimate_mixed_changes_per_layer(comps, {0.5, 0.5}, "", true) == Approx(2.));
+    REQUIRE(estimate_mixed_changes_per_layer({1, 2, 3}, {0.4, 0.3, 0.3}, "", true) == Approx(3.));
+    // 50/50 alternation changes every layer; 90/10 about twice per ten layers.
+    REQUIRE(estimate_mixed_changes_per_layer(comps, {0.5, 0.5}, "", false) == Approx(1.).epsilon(0.01));
+    REQUIRE(estimate_mixed_changes_per_layer(comps, {0.9, 0.1}, "", false) == Approx(0.2).epsilon(0.02));
+    REQUIRE(estimate_mixed_changes_per_layer({1}, {1.}, "", true) == 0.);
+}

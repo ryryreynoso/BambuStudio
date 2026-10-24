@@ -804,6 +804,46 @@ std::vector<double> clamp_mixed_sublayer_heights(const std::vector<double> &heig
     return out;
 }
 
+double estimate_mixed_changes_per_layer(const std::vector<unsigned int> &components,
+                                        const std::vector<double>       &ratios,
+                                        const std::string               &pattern,
+                                        bool                             sublayers)
+{
+    if (components.size() < 2)
+        return 0.;
+    std::vector<std::vector<unsigned int>> groups;
+    if (!pattern.empty() && parse_mixed_pattern(pattern, components, groups) && !groups.empty()) {
+        const std::vector<unsigned int> seq = mixed_pattern_layer_sequence(groups);
+        size_t changes = 0;
+        for (size_t i = 0; i < seq.size(); ++i)
+            changes += seq[i] != seq[(i + 1) % seq.size()];
+        return double(changes) / double(seq.size());
+    }
+    if (sublayers)
+        return double(components.size());
+
+    // Deficit round-robin over equal layer heights, as ToolOrdering::resolve_mixed_filaments().
+    std::vector<double> r = ratios;
+    r.resize(components.size(), 0.);
+    const double total = std::accumulate(r.begin(), r.end(), 0.);
+    if (total <= 0.)
+        r.assign(components.size(), 1.);
+    std::vector<double> accum(components.size(), 0.);
+    constexpr int       layers = 1000;
+    int                 changes = 0;
+    size_t              prev    = components.size();
+    for (int layer = 0; layer < layers; ++layer) {
+        for (size_t k = 0; k < accum.size(); ++k)
+            accum[k] += r[k] / (total > 0. ? total : double(r.size()));
+        const size_t sel = size_t(std::max_element(accum.begin(), accum.end()) - accum.begin());
+        accum[sel] -= 1.;
+        if (prev != components.size() && sel != prev)
+            ++changes;
+        prev = sel;
+    }
+    return double(changes) / double(layers);
+}
+
 static bool is_mixed_pattern_separator(char c)
 {
     return c == '/' || c == ' ' || c == '\t' || c == '-' || c == '_';

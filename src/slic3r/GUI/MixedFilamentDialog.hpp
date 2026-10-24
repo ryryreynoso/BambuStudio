@@ -84,6 +84,8 @@ private:
     // Parses the cycle pattern text into m_result.cycle_pattern (and ratios from its step
     // counts), setting m_cycle_error when the text is not a valid pattern for the components.
     void validate_cycle_pattern();
+    // Shows the AMS filament changes the current recipe causes (estimate_mixed_changes_per_layer).
+    void update_change_estimate();
     void on_add_material();
     void on_remove_material();
     void on_recommendation_clicked(unsigned int comp_a, unsigned int comp_b);
@@ -126,6 +128,7 @@ private:
     wxTextCtrl*                 m_cycle_input{nullptr};
     wxPanel*                    m_cycle_strip{nullptr};
     wxString                    m_cycle_error;
+    wxStaticText*               m_change_estimate{nullptr};
     bool                        m_edit_mode{false};
     std::vector<std::string>    m_physical_colors;
     std::vector<std::string>    m_physical_names;
