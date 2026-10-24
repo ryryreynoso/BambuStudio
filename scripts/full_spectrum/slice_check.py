@@ -72,7 +72,7 @@ def slice_(binary, workdir, machine, process, filaments, model, object_filament,
     os.makedirs(out)
     cmd = [binary, "--slice", "0", "--load-settings", machine + ";" + process,
            "--load-filaments", ";".join(filaments),
-           "--loaded-filament-ids", str(object_filament), "--outputdir", out] + extra + [model]
+           "--load-filament-ids", str(object_filament), "--outputdir", out] + extra + [model]
     print("$", " ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     log = os.path.join(workdir, "slice.log")
