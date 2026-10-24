@@ -276,6 +276,9 @@ public:
 
     // Mixed Filament sidebar
     void add_mixed_filament();
+    // Full Spectrum auto-generation: a 50/50 mix for every pair of same-type physical filaments
+    // that does not have one yet.
+    void add_all_pair_mixed_filaments();
     // Convert Full Spectrum mixed filaments stored in a loaded 3MF project into native slots.
     void import_full_spectrum_mixed_filaments(const std::string &path_3mf);
     void edit_mixed_filament(size_t idx);

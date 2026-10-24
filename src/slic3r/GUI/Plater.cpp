@@ -3123,8 +3123,18 @@ Sidebar::Sidebar(Plater *parent)
         title_sizer->Add(mixed_line_panel, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(8));
 
         p->m_btn_mixed_add = new ScalableButton(p->m_panel_mixed_title, wxID_ANY, "add_filament");
-        p->m_btn_mixed_add->SetToolTip(_L("Add mixed filament"));
+        p->m_btn_mixed_add->SetToolTip(_L("Add mixed filament (right-click for more options)"));
         p->m_btn_mixed_add->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { add_mixed_filament(); });
+        p->m_btn_mixed_add->Bind(wxEVT_RIGHT_DOWN, [this](wxMouseEvent&) {
+            wxMenu menu;
+            const int id_add   = wxWindow::NewControlId();
+            const int id_pairs = wxWindow::NewControlId();
+            menu.Append(id_add, _L("Add mixed filament..."));
+            menu.Append(id_pairs, _L("Add 50/50 mixes of all filament pairs"));
+            menu.Bind(wxEVT_MENU, [this](wxCommandEvent&) { add_mixed_filament(); }, id_add);
+            menu.Bind(wxEVT_MENU, [this](wxCommandEvent&) { add_all_pair_mixed_filaments(); }, id_pairs);
+            p->m_btn_mixed_add->PopupMenu(&menu);
+        });
         title_sizer->Add(p->m_btn_mixed_add, 0, wxALIGN_CENTER_VERTICAL);
 
         p->m_btn_mixed_del = new ScalableButton(p->m_panel_mixed_title, wxID_ANY, "delete_filament");
@@ -6162,6 +6172,45 @@ void Sidebar::add_mixed_filament()
         auto result = dlg.get_result();
         create_mixed_filament_from_result(this, result, color_strs);
     }
+}
+
+void Sidebar::add_all_pair_mixed_filaments()
+{
+    std::vector<std::string> color_strs, names, types;
+    collect_physical_filament_info(color_strs, names, types);
+    const size_t num_physical = color_strs.size();
+    if (num_physical < 2)
+        return;
+
+    // Pairs that already exist as a two-component mix, in either order.
+    std::set<std::pair<unsigned int, unsigned int>> existing;
+    auto &project_config = wxGetApp().preset_bundle->project_config;
+    const auto *is_mixed = project_config.option<ConfigOptionBools>("filament_is_mixed");
+    const auto *comps    = project_config.option<ConfigOptionStrings>("filament_mixed_components");
+    if (is_mixed && comps)
+        for (size_t i = 0; i < is_mixed->values.size() && i < comps->values.size(); ++i)
+            if (is_mixed->values[i]) {
+                auto c = parse_mixed_components(comps->values[i]);
+                if (c.size() == 2)
+                    existing.insert({std::min(c[0], c[1]), std::max(c[0], c[1])});
+            }
+
+    std::vector<MixedFilamentResult> results;
+    for (unsigned int a = 1; a <= num_physical; ++a)
+        for (unsigned int b = a + 1; b <= num_physical; ++b) {
+            // Mixing different materials is rejected by validation, so only pair matching types.
+            if (a <= types.size() && b <= types.size() && types[a - 1] != types[b - 1])
+                continue;
+            if (existing.count({a, b}))
+                continue;
+            MixedFilamentResult r;
+            r.components = {a, b};
+            r.ratios     = {50, 50};
+            results.push_back(std::move(r));
+        }
+    if (results.empty())
+        return;
+    create_mixed_filaments_from_results(this, results, color_strs);
 }
 
 void Sidebar::import_full_spectrum_mixed_filaments(const std::string &path_3mf)
