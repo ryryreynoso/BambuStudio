@@ -629,6 +629,7 @@ void MixedFilamentDialog::build_ui()
     m_right_sizer = new wxBoxSizer(wxVERTICAL);
     m_right_sizer->Add(create_material_selection(), 0, wxEXPAND);
     m_right_sizer->Add(create_gradient_section(), 0, wxEXPAND | wxTOP, FromDIP(7));
+    m_right_sizer->Add(create_cycle_section(), 0, wxEXPAND | wxTOP, FromDIP(7));
 
     m_ratio_sizer = create_ratio_slider();
     m_right_sizer->Add(m_ratio_sizer, 0, wxEXPAND | wxTOP, FromDIP(7));
@@ -1240,6 +1241,107 @@ wxBoxSizer* MixedFilamentDialog::create_gradient_section()
     return outer;
 }
 
+// Full Spectrum "Cycle" mode: an exact per-layer sequence instead of a ratio.
+wxBoxSizer* MixedFilamentDialog::create_cycle_section()
+{
+    auto* outer = new wxBoxSizer(wxVERTICAL);
+    auto* row   = new wxBoxSizer(wxHORIZONTAL);
+
+    auto* label = new wxStaticText(this, wxID_ANY, _L("Cycle pattern"));
+    label->SetFont(::Label::Body_13);
+    const wxString tip = _L("Optional exact layer sequence. Use A, B, C... for the selected materials or their "
+                            "filament numbers, e.g. \"AAB\" or \"1/1/2\" prints two layers of the first material, "
+                            "then one of the second, repeating. Leave empty to use the ratio.");
+    label->SetToolTip(tip);
+    row->Add(label, 0, wxALIGN_CENTER_VERTICAL);
+
+    m_cycle_input = new wxTextCtrl(this, wxID_ANY, wxString::FromUTF8(m_result.cycle_pattern), wxDefaultPosition,
+                                   wxSize(FromDIP(152), FromDIP(24)));
+    m_cycle_input->SetHint(_L("e.g. AAB"));
+    m_cycle_input->SetToolTip(tip);
+    m_cycle_input->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { on_cycle_pattern_changed(); });
+    row->Add(m_cycle_input, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
+    outer->Add(row, 0, wxEXPAND);
+
+    // One stripe per layer of the cycle, repeated to fill the strip (bottom layer on the left).
+    m_cycle_strip = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, FromDIP(12)));
+    m_cycle_strip->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    m_cycle_strip->Bind(wxEVT_PAINT, [this](wxPaintEvent&) {
+        wxBufferedPaintDC dc(m_cycle_strip);
+        const wxSize sz = m_cycle_strip->GetClientSize();
+        dc.SetBrush(wxBrush(StateColor::darkModeColorFor(*wxWHITE)));
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.DrawRectangle(0, 0, sz.GetWidth(), sz.GetHeight());
+        std::vector<std::vector<unsigned int>> groups;
+        if (m_result.cycle_pattern.empty() || !Slic3r::parse_mixed_pattern(m_result.cycle_pattern, m_result.components, groups))
+            return;
+        const std::vector<unsigned int> seq = Slic3r::mixed_pattern_layer_sequence(groups);
+        const int stripe = std::max(FromDIP(4), sz.GetWidth() / 48);
+        for (int x = 0, layer = 0; x < sz.GetWidth(); x += stripe, ++layer) {
+            const unsigned int id = Slic3r::resolve_mixed_pattern(seq, size_t(layer));
+            if (id < 1 || id > m_physical_colors.size())
+                continue;
+            dc.SetBrush(wxBrush(wxColour(wxString::FromUTF8(m_physical_colors[id - 1]))));
+            dc.DrawRectangle(x, 0, stripe, sz.GetHeight());
+        }
+    });
+    outer->Add(m_cycle_strip, 0, wxEXPAND | wxTOP, FromDIP(4));
+    m_cycle_strip->Show(!m_result.cycle_pattern.empty());
+    return outer;
+}
+
+void MixedFilamentDialog::validate_cycle_pattern()
+{
+    m_cycle_error.clear();
+    m_result.cycle_pattern.clear();
+    if (!m_cycle_input)
+        return;
+    const std::string text = into_u8(m_cycle_input->GetValue());
+    std::vector<std::vector<unsigned int>> groups;
+    std::string err;
+    if (!Slic3r::parse_mixed_pattern(text, m_result.components, groups, &err)) {
+        m_cycle_error = wxString::Format(_L("Invalid cycle pattern: %s"), wxString::FromUTF8(err));
+        return;
+    }
+    if (groups.empty())
+        return;
+    if (groups.size() > 1) {
+        m_cycle_error = _L("Per-perimeter cycle groups (\",\") are not supported yet.");
+        return;
+    }
+    const std::vector<unsigned int> seq = Slic3r::mixed_pattern_layer_sequence(groups);
+    std::vector<int> counts(m_result.components.size(), 0);
+    for (unsigned int id : seq) {
+        auto it = std::find(m_result.components.begin(), m_result.components.end(), id);
+        if (it == m_result.components.end()) {
+            m_cycle_error = wxString::Format(_L("Filament %d in the cycle pattern is not one of the selected materials."), int(id));
+            return;
+        }
+        ++counts[size_t(it - m_result.components.begin())];
+    }
+    m_result.cycle_pattern = Slic3r::serialize_mixed_pattern(groups);
+    // Ratios follow the pattern, so previews and estimates match what is printed.
+    int assigned = 0;
+    for (size_t i = 0; i < counts.size(); ++i) {
+        m_result.ratios[i] = std::max(1, int(std::lround(100. * counts[i] / double(seq.size()))));
+        assigned += m_result.ratios[i];
+    }
+    m_result.ratios[size_t(std::max_element(counts.begin(), counts.end()) - counts.begin())] += 100 - assigned;
+}
+
+void MixedFilamentDialog::on_cycle_pattern_changed()
+{
+    // A cycle pattern and a gradient are mutually exclusive.
+    if (!m_cycle_input->GetValue().IsEmpty() && m_result.gradient_enabled && m_chk_gradient) {
+        m_chk_gradient->SetValue(false);
+        on_gradient_toggled();
+    }
+    update_ok_button_state();
+    refresh_ratio_labels();
+    sync_triangle_weights_from_ratios();
+    update_preview();
+}
+
 wxBoxSizer* MixedFilamentDialog::create_recommendation_grid()
 {
     auto* outer = new wxBoxSizer(wxVERTICAL);
@@ -1516,6 +1618,10 @@ void MixedFilamentDialog::on_gradient_toggled()
     }
 
     m_result.gradient_enabled = m_chk_gradient->GetValue();
+    if (m_result.gradient_enabled && m_cycle_input && !m_cycle_input->GetValue().IsEmpty()) {
+        m_cycle_input->ChangeValue(wxEmptyString);
+        update_ok_button_state();
+    }
 
     if (m_ratio_sizer)
         m_ratio_sizer->ShowItems(!m_result.gradient_enabled && num_components() == 2);
@@ -1801,6 +1907,23 @@ void MixedFilamentDialog::update_ok_button_state()
 {
     if (!m_btn_ok) return;
 
+    validate_cycle_pattern();
+    const bool cycle_active = !m_result.cycle_pattern.empty();
+    if (m_cycle_input) {
+        m_cycle_input->SetForegroundColour(m_cycle_error.empty() ? StateColor::darkModeColorFor(wxColour("#262E30")) : wxColour("#E14747"));
+        m_cycle_input->SetToolTip(m_cycle_error.empty() ? wxString() : m_cycle_error);
+        m_cycle_input->Refresh();
+    }
+    if (m_cycle_strip) {
+        m_cycle_strip->Show(cycle_active);
+        m_cycle_strip->Refresh();
+    }
+    // The ratio follows the pattern while a cycle is active.
+    if (m_ratio_bar)
+        m_ratio_bar->Enable(!cycle_active);
+    if (m_triangle_panel)
+        m_triangle_panel->Enable(!cycle_active);
+
     bool has_type_mismatch = false;
     if (!m_physical_types.empty() && m_result.components.size() >= 2) {
         std::map<std::string, std::vector<unsigned int>> type_groups;
@@ -1835,9 +1958,14 @@ void MixedFilamentDialog::update_ok_button_state()
         if (c == 0) { has_unselected = true; break; }
     }
 
-    bool can_confirm = !has_type_mismatch && !has_unselected;
+    const bool has_cycle_error = !m_cycle_error.empty();
+    bool can_confirm = !has_type_mismatch && !has_unselected && !has_cycle_error;
     m_btn_ok->Enable(can_confirm);
-    if (has_unselected) {
+    if (has_cycle_error) {
+        m_btn_ok->SetBackgroundColor(wxColour("#CECECE"));
+        m_btn_ok->SetBorderColor(wxColour("#CECECE"));
+        m_btn_ok->SetToolTip(m_cycle_error);
+    } else if (has_unselected) {
         m_btn_ok->SetBackgroundColor(wxColour("#CECECE"));
         m_btn_ok->SetBorderColor(wxColour("#CECECE"));
         m_btn_ok->SetToolTip(_L("Please select a filament for all components"));

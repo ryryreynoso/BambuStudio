@@ -70,6 +70,7 @@ private:
     wxBoxSizer* create_ratio_slider();
     wxBoxSizer* create_triangle_picker();
     wxBoxSizer* create_gradient_section();
+    wxBoxSizer* create_cycle_section();
     wxBoxSizer* create_recommendation_grid();
     wxBoxSizer* create_button_panel();
 
@@ -79,6 +80,10 @@ private:
     void on_gradient_direction_changed();
     void on_gradient_curve_changed();
     void on_per_part_gradient_toggled();
+    void on_cycle_pattern_changed();
+    // Parses the cycle pattern text into m_result.cycle_pattern (and ratios from its step
+    // counts), setting m_cycle_error when the text is not a valid pattern for the components.
+    void validate_cycle_pattern();
     void on_add_material();
     void on_remove_material();
     void on_recommendation_clicked(unsigned int comp_a, unsigned int comp_b);
@@ -118,6 +123,9 @@ private:
     wxColour        comp_colour(size_t i) const;
 
     MixedFilamentResult         m_result;
+    wxTextCtrl*                 m_cycle_input{nullptr};
+    wxPanel*                    m_cycle_strip{nullptr};
+    wxString                    m_cycle_error;
     bool                        m_edit_mode{false};
     std::vector<std::string>    m_physical_colors;
     std::vector<std::string>    m_physical_names;

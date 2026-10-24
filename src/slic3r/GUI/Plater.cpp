@@ -6307,15 +6307,13 @@ void Sidebar::edit_mixed_filament(size_t panel_idx)
     if (dlg.ShowModal() == wxID_OK) {
         auto result = dlg.get_result();
         if (result.components.size() < 2 || result.ratios.size() < 2) return;
-        // The dialog does not edit cycle patterns or explicit gradient ranges yet: keep them
-        // while the components (and the gradient direction) are unchanged.
-        if (result.components == existing.components) {
-            if (result.cycle_pattern.empty() && !result.gradient_enabled)
-                result.cycle_pattern = existing.cycle_pattern;
-            if (result.gradient_range.empty() && result.gradient_enabled && existing.gradient_enabled &&
-                result.gradient_direction == existing.gradient_direction && result.gradient_curve.empty())
-                result.gradient_range = existing.gradient_range;
-        }
+        // The dialog does not edit explicit gradient ranges (imported Full Spectrum gradients):
+        // keep them while the components and the gradient direction are unchanged.
+        if (result.components == existing.components && result.gradient_enabled && existing.gradient_enabled &&
+            result.gradient_direction == existing.gradient_direction && result.gradient_curve.empty())
+            result.gradient_range = existing.gradient_range;
+        else if (result.gradient_range == existing.gradient_range && !existing.gradient_range.empty())
+            result.gradient_range.clear();
 
         // Serialize components
         std::string comp_str;
