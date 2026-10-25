@@ -1874,6 +1874,16 @@ MultiNozzleUtils::LayeredNozzleGroupResult ToolOrdering::get_recommended_filamen
 
     auto nozzle_list = build_default_nozzle_list(print_config, extruder_nums);
 
+    // Tool changers with more than two independent extruders (e.g. Snapmaker U1): filament k prints
+    // on tool k, as in OrcaSlicer / Snapmaker Orca. The grouping below only supports two extruders.
+    if (extruder_nums > 2 && !has_multiple_nozzle) {
+        std::vector<int> tool_map(filament_nums, 0);
+        for (size_t fid = 0; fid < filament_nums; ++fid)
+            tool_map[fid] = int(std::min(fid, extruder_nums - 1));
+        auto result = LayeredNozzleGroupResult::create(tool_map, nozzle_list, used_filaments);
+        return result ? *result : LayeredNozzleGroupResult();
+    }
+
     // 处理非H2C的手动模式，此时可以直接退出
     if (mode == FilamentMapMode::fmmManual && !has_multiple_nozzle){
         auto manual_filament_map = print_config.filament_map.values;

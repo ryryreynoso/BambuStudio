@@ -16,7 +16,7 @@ def load_index(folder):
     index = {}
     for name in os.listdir(folder):
         if name.endswith(".json"):
-            with open(os.path.join(folder, name), encoding="utf-8") as f:
+            with open(os.path.join(folder, name), encoding="utf-8-sig") as f:
                 data = json.load(f)
             index[data.get("name", name[:-5])] = data
     return index
