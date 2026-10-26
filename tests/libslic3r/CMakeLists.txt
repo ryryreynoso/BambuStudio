@@ -56,6 +56,7 @@ add_executable(full_spectrum_tests
     test_full_spectrum_core.cpp
     test_full_spectrum_import.cpp
     test_full_spectrum_gradient.cpp
+    test_moonraker_host.cpp
     )
 # libslic3r references symbols defined in libslic3r_gui (Http, BBL_Encrypt, nanosvg); link it too.
 target_link_libraries(full_spectrum_tests test_common libslic3r libslic3r_gui)

@@ -499,7 +499,9 @@ void PhysicalPrinterDialog::update_host_type(bool printer_change)
     };
     if ((printer_change && all_presets_are_from_mk3_family) || all_presets_are_from_mk3_family)
         set_to_choice_and_config(htPrusaLink);  
-    else if ((printer_change && !all_presets_are_from_mk3_family) || (!all_presets_are_from_mk3_family && m_config->option<ConfigOptionEnum<PrintHostType>>("host_type")->value == htPrusaLink))
+    else if (m_config->option<ConfigOptionEnum<PrintHostType>>("host_type")->value == htPrusaLink)
+        // PrusaLink is offered only for the MK3 family; otherwise keep the printer profile's host
+        // type (e.g. Moonraker for the Snapmaker U1) instead of always switching to OctoPrint.
         set_to_choice_and_config(htOctoPrint);
     else
         choice->set_value(m_config->option("host_type")->getInt());

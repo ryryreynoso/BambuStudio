@@ -25,6 +25,10 @@ OVERRIDES = {
     MACRO_LANGUAGE_BASE: {"gcode_macro_language": "orca"},
     "fdm_process_U1_common": {"enable_prime_tower": "0"},
 }
+# Snapmaker Orca lists the U1 as "octoprint" but talks to it through its own Moonraker client;
+# Bambu Studio's Moonraker host does the same, without relying on Moonraker's OctoPrint emulation.
+for _nozzle in ("0.2", "0.4", "0.6", "0.8"):
+    OVERRIDES["Snapmaker U1 (%s nozzle)" % _nozzle] = {"host_type": "moonraker"}
 
 
 def load(path):
