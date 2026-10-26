@@ -14,6 +14,9 @@ class Extruder
 {
 public:
     Extruder(unsigned int id, GCodeConfig *config, bool share_extruder);
+    // Number of physical extruder slots addressed through filament_map: two on Bambu printers,
+    // more on toolchangers such as the Snapmaker U1.
+    static size_t physical_extruder_slots(const GCodeConfig &config);
     virtual ~Extruder() {}
 
     void   reset() {
