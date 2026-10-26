@@ -1,0 +1,34 @@
+name: iPhone companion app
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios_companion.yml'
+  pull_request:
+    paths:
+      - 'ios/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: ios/PrinterCompanion
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build and run unit tests (simulator, unsigned)
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [0-9]+[^(]*' | sed 's/ *$//')
+          xcodebuild test \
+            -project PrinterCompanion.xcodeproj -scheme PrinterCompanion \
+            -destination "platform=iOS Simulator,name=${DEVICE}" \
+            CODE_SIGNING_ALLOWED=NO
