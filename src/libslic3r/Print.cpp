@@ -3292,7 +3292,13 @@ std::map<int, std::set<NozzleVolumeType>> Print::get_filament_unprintable_flow(c
 
 std::vector<double> Print::get_extruder_printable_height() const
 {
-    return m_config.extruder_printable_height.values;
+    // Printers that do not limit the height per extruder (e.g. the Snapmaker U1 toolchanger) leave
+    // the option at its default of 0; every extruder can then reach the full printable height.
+    std::vector<double> heights = m_config.extruder_printable_height.values;
+    for (double &height : heights)
+        if (!(height > 0.))
+            height = m_config.printable_height.value;
+    return heights;
 }
 
 std::vector<Polygons> Print::get_extruder_printable_polygons() const
