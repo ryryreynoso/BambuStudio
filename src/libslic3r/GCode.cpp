@@ -3951,7 +3951,17 @@ std::string GCode::placeholder_parser_process_with_outputs(const std::string &te
     outputs.set_key_value("e_retracted", new ConfigOptionFloats(retracted));
     outputs.set_key_value("e_restart_extra", new ConfigOptionFloats(restart_extra));
 
-    std::string gcode = m_placeholder_parser.process(templ, current_filament_id, config_override, &outputs, &m_placeholder_parser_context);
+    // OrcaSlicer templates compare travel_speed with numbers, so expose the travel speed of the
+    // filament being processed as a scalar; Bambu keeps it per extruder variant.
+    DynamicConfig overrides;
+    if (config_override != nullptr)
+        overrides = *config_override;
+    if (!overrides.has("travel_speed") && !m_config.travel_speed.empty()) {
+        const unsigned int filament_id = current_filament_id < m_config.filament_volume_map.size() ? current_filament_id : 0;
+        overrides.set_key_value("travel_speed", new ConfigOptionFloat(m_config.travel_speed.get_at(get_process_config_idx(m_config, filament_id))));
+    }
+
+    std::string gcode = m_placeholder_parser.process(templ, current_filament_id, &overrides, &outputs, &m_placeholder_parser_context);
 
     const std::vector<double> &pos = outputs.option<ConfigOptionFloats>("position")->values;
     const std::vector<double> &out_retracted = outputs.option<ConfigOptionFloats>("e_retracted")->values;
