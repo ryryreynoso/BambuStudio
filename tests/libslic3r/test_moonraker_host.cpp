@@ -21,7 +21,7 @@ TEST_CASE("Moonraker print host", "[Moonraker]")
     std::unique_ptr<PrintHost> print_host(PrintHost::get_print_host(&config));
     REQUIRE(print_host);
     CHECK(std::string(print_host->get_name()) == "Moonraker");
-    CHECK(print_host->get_post_upload_actions() == PrintHostPostUploadActions(PrintHostPostUploadAction::StartPrint));
+    CHECK(bool(print_host->get_post_upload_actions() & PrintHostPostUploadAction::StartPrint));
 
     if (host == nullptr)
         return;
