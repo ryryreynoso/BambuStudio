@@ -1125,6 +1125,19 @@ namespace Slic3r
         std::vector<std::vector<unsigned int>>* filament_sequences,
         const std::unordered_map<int, int>& nozzle_status)
     {
+        // Toolchangers (e.g. the Snapmaker U1) map filaments to more than two extruders; the grouping
+        // below only knows extruders 0 and 1 and would drop the others from every layer. Each tool
+        // holds its own filament, so order all of them as one group: the tool used last on the
+        // previous layer goes first and the rest follow the flush matrix of the first extruder.
+        if (std::any_of(filament_maps.begin(), filament_maps.end(), [](int extruder) { return extruder >= 2; })) {
+            std::unordered_map<int, int> single_group_status;
+            if (auto it = nozzle_status.find(0); it != nozzle_status.end())
+                single_group_status.emplace(0, it->second);
+            return reorder_filaments_for_minimum_flush_volume(filament_lists, std::vector<int>(filament_maps.size(), 0), layer_filaments,
+                                                              std::vector<FlushMatrix>{flush_matrix.front()}, get_custom_seq, filament_sequences,
+                                                              single_group_status);
+        }
+
         //only when layer filament num <= 5,we do forcast
         constexpr int max_n_with_forcast = 5;
         int cost = 0;

@@ -10,6 +10,7 @@ usage:
   slice_check.py cycle    <bambu-studio> <workdir>          # cycle pattern on X1C + AMS
   slice_check.py sublayer <bambu-studio> <workdir>          # ratio mix with sub-layers + min height
   slice_check.py regress  <baseline-bin> <feature-bin> <workdir>
+  slice_check.py u1       <bambu-studio> <workdir>          # 4-tool Snapmaker U1 job, one cube per tool
 """
 import json
 import os
@@ -21,14 +22,15 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 BBL = os.path.join(REPO, "resources", "profiles", "BBL")
+SNAPMAKER = os.path.join(REPO, "resources", "profiles", "Snapmaker")
 
 PRINTER = "Bambu Lab X1 Carbon 0.4 nozzle"
 PROCESS = "0.20mm Standard @BBL X1C"
 FILAMENT = "Bambu PLA Basic @BBL X1C"
 
 
-def flatten(kind, name, out):
-    subprocess.check_call([sys.executable, os.path.join(HERE, "flatten_bbl_preset.py"), BBL, kind, name, out])
+def flatten(kind, name, out, root=BBL):
+    subprocess.check_call([sys.executable, os.path.join(HERE, "flatten_bbl_preset.py"), root, kind, name, out])
 
 
 def write_cube(path, size=20.0):
@@ -66,13 +68,13 @@ def prepare(workdir, colours):
     return machine, process, filaments, cube
 
 
-def slice_(binary, workdir, machine, process, filaments, model, object_filament, extra):
+def slice_(binary, workdir, machine, process, filaments, model, object_filament, extra, models=None):
     out = os.path.join(workdir, "out")
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(out)
     cmd = [binary, "--slice", "0", "--load-settings", machine + ";" + process,
            "--load-filaments", ";".join(filaments),
-           "--load-filament-ids", str(object_filament), "--outputdir", out] + extra + [model]
+           "--load-filament-ids", str(object_filament), "--outputdir", out] + extra + (models or [model])
     print("$", " ".join(cmd))
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     log = os.path.join(workdir, "slice.log")
@@ -164,6 +166,66 @@ def check_sublayer(binary, workdir):
     print("first layers:", [(z, t) for z, t in layers[:6]])
 
 
+def check_u1(binary, workdir):
+    """Four cubes on a Snapmaker U1, cube i assigned to filament i. Every cube must be printed by its
+    own tool on every layer, each tool change must come from the U1 change_filament_gcode (heat the
+    next tool, then select it), and no custom G-code template may fail."""
+    os.makedirs(workdir, exist_ok=True)
+    machine = os.path.join(workdir, "machine.json")
+    process = os.path.join(workdir, "process.json")
+    flatten("machine", "Snapmaker U1 (0.4 nozzle)", machine, SNAPMAKER)
+    flatten("process", "0.20mm Standard @Snapmaker U1 (0.4 nozzle)", process, SNAPMAKER)
+    if json.load(open(machine)).get("gcode_macro_language") != "orca":
+        raise SystemExit("the U1 machine profile does not select the OrcaSlicer macro language")
+    with_settings(process, {})
+    base = os.path.join(workdir, "filament_base.json")
+    flatten("filament", "Generic PLA", base, SNAPMAKER)
+    filaments = []
+    for i, colour in enumerate(["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]):
+        data = json.load(open(base))
+        data["filament_colour"] = [colour]
+        path = os.path.join(workdir, "filament_%d.json" % (i + 1))
+        json.dump(data, open(path, "w"), indent=2)
+        filaments.append(path)
+    cube = os.path.join(workdir, "cube.stl")
+    write_cube(cube, 15.0)
+    gcode = slice_(binary, workdir, machine, process, filaments, cube, "1,2,3,4", [], models=[cube] * 4)
+
+    tool, heated, problems = None, set(), []
+    objects = {}  # object index -> set of tools that printed it
+    changes = 0
+    for n, line in enumerate(open(gcode, errors="replace"), 1):
+        line = line.strip()
+        if line.startswith("!!!!!"):
+            problems.append("line %d: %s" % (n, line))
+        m = re.match(r"^M10[49] (?:S\d+ T(\d+)|T(\d+) S\d+)", line)
+        if m:
+            heated.add(int(m.group(1) or m.group(2)))
+        m = re.match(r"^T(\d+)$", line)
+        if m:
+            t = int(m.group(1))
+            if t > 3:
+                problems.append("line %d: tool T%d does not exist on the U1" % (n, t))
+            if t != tool:
+                changes += 1
+                if t not in heated:
+                    problems.append("line %d: T%d selected before it was heated" % (n, t))
+            tool = t
+        m = re.match(r"^EXCLUDE_OBJECT_START NAME=cube\.stl_id_(\d+)_", line)
+        if m:
+            objects.setdefault(int(m.group(1)), set()).add(tool)
+    print("tool changes: %d, tools per object: %s" % (changes, {k: sorted(v) for k, v in sorted(objects.items())}))
+    for obj, tools in sorted(objects.items()):
+        if tools != {obj}:
+            problems.append("cube %d printed by tools %s, expected only T%d" % (obj, sorted(tools), obj))
+    if len(objects) != 4:
+        problems.append("expected 4 cubes, found %d" % len(objects))
+    if problems:
+        print("PROBLEMS:", *problems[:20], sep="\n  ")
+        raise SystemExit(1)
+    print("OK: every cube printed by its own tool, every tool heated before selection, no template errors")
+
+
 def strip_volatile(path):
     keep = []
     for line in open(path, errors="replace"):
@@ -205,6 +267,8 @@ if __name__ == "__main__":
         check_cycle(sys.argv[2], sys.argv[3])
     elif mode == "sublayer":
         check_sublayer(sys.argv[2], sys.argv[3])
+    elif mode == "u1":
+        check_u1(sys.argv[2], sys.argv[3])
     elif mode == "regress":
         regress(sys.argv[2], sys.argv[3], sys.argv[4])
     else:

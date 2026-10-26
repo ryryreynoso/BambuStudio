@@ -17,6 +17,14 @@ KINDS = ("machine", "process", "filament")
 # Snapmaker's G-code templates use the OrcaSlicer macro language (local variables, writable
 # position[] and so on); this printer setting selects that engine for every Snapmaker machine.
 MACRO_LANGUAGE_BASE = "fdm_klipper"
+# Settings changed from Snapmaker's defaults, per profile. Bambu Studio's prime tower is built for
+# single-nozzle AMS printers and is not verified on a toolchanger, and Bambu rejects it together
+# with ooze prevention (which every U1 process enables), so the U1 profiles default to no tower;
+# the U1 primes each tool with its own SM_PRINT_PREEXTRUDE_FILAMENT macro on tool change.
+OVERRIDES = {
+    MACRO_LANGUAGE_BASE: {"gcode_macro_language": "orca"},
+    "fdm_process_U1_common": {"enable_prime_tower": "0"},
+}
 
 
 def load(path):
@@ -72,9 +80,9 @@ def main():
         for item in vendor[kind + "_list"]:
             if item["name"] in wanted:
                 dst_path = os.path.join(out_dir, item["sub_path"])
-                if item["name"] == MACRO_LANGUAGE_BASE:
+                if item["name"] in OVERRIDES:
                     data = dict(entries[item["name"]][2])
-                    data["gcode_macro_language"] = "orca"
+                    data.update(OVERRIDES[item["name"]])
                     with open(dst_path, "w", encoding="utf-8") as f:
                         json.dump(data, f, indent=4)
                         f.write("\n")
