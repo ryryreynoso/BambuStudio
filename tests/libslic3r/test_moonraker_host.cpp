@@ -13,10 +13,14 @@ using namespace Slic3r;
 // to enable. Without it the test only checks that the host type resolves to the Moonraker host.
 TEST_CASE("Moonraker print host", "[Moonraker]")
 {
-    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    // The print host options belong to physical printers, not to the full print config.
+    DynamicPrintConfig config;
     config.set_key_value("host_type", new ConfigOptionEnum<PrintHostType>(htMoonraker));
     const char *host = std::getenv("MOONRAKER_TEST_HOST");
     config.set_key_value("print_host", new ConfigOptionString(host ? host : "127.0.0.1:1"));
+    config.set_key_value("printhost_apikey", new ConfigOptionString(""));
+    config.set_key_value("printhost_cafile", new ConfigOptionString(""));
+    config.set_key_value("printhost_ssl_ignore_revoke", new ConfigOptionBool(false));
 
     std::unique_ptr<PrintHost> print_host(PrintHost::get_print_host(&config));
     REQUIRE(print_host);
