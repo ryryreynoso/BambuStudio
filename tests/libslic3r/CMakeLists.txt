@@ -60,5 +60,11 @@ add_executable(full_spectrum_tests
     )
 # libslic3r references symbols defined in libslic3r_gui (Http, BBL_Encrypt, nanosvg); link it too.
 target_link_libraries(full_spectrum_tests test_common libslic3r libslic3r_gui)
+# test_moonraker_host.cpp includes the print host headers, which need wxWidgets; reuse the include
+# directories and definitions src/ set up for libslic3r_gui.
+get_target_property(_slic3r_gui_includes libslic3r_gui INCLUDE_DIRECTORIES)
+get_directory_property(_slic3r_gui_definitions DIRECTORY ${CMAKE_SOURCE_DIR}/src COMPILE_DEFINITIONS)
+target_include_directories(full_spectrum_tests PRIVATE ${_slic3r_gui_includes})
+target_compile_definitions(full_spectrum_tests PRIVATE ${_slic3r_gui_definitions})
 set_property(TARGET full_spectrum_tests PROPERTY FOLDER "tests")
 add_test(full_spectrum_tests full_spectrum_tests ${CATCH_EXTRA_ARGS})
