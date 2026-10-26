@@ -3013,6 +3013,9 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 chamber_cooling_mode = 1; // weak cooling
         }
         m_placeholder_parser.set("chamber_cooling_mode", new ConfigOptionInt(chamber_cooling_mode));
+        // OrcaSlicer templates name the per-filament nozzle temperature "temperature".
+        if (const ConfigOption *nozzle_temperature = m_placeholder_parser.config().option("nozzle_temperature"))
+            m_placeholder_parser.set("temperature", nozzle_temperature->clone());
     }
 
     std::string machine_start_gcode = this->placeholder_parser_process("machine_start_gcode", print.config().machine_start_gcode.value, initial_extruder_id);

@@ -13,6 +13,13 @@ Extruder::Extruder(unsigned int id, GCodeConfig *config, bool share_extruder) :
     m_config(config),
     m_share_extruder(share_extruder)
 {
+    // The shared E and retraction slots are indexed by the physical extruder (filament_map); Bambu
+    // printers have at most two, toolchangers such as the Snapmaker U1 have more.
+    const size_t n_extruders = std::max<size_t>(2, config->nozzle_diameter.size());
+    if (m_share_E.size() < n_extruders) {
+        m_share_E.resize(n_extruders, 0.);
+        m_share_retracted.resize(n_extruders, 0.);
+    }
     reset();
     // cache values that are going to be called often
     m_e_per_mm3 = this->filament_flow_ratio();

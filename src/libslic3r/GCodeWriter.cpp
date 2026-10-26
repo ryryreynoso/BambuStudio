@@ -71,7 +71,8 @@ void GCodeWriter::set_extruders(std::vector<unsigned int> extruder_ids)
     std::sort(extruder_ids.begin(), extruder_ids.end());
     m_curr_extruder_id = -1;
     m_current_process_config_idx = 0;
-    std::fill(m_curr_filament_extruder.begin(), m_curr_filament_extruder.end(), nullptr);
+    // One slot per physical extruder: two on Bambu printers, more on toolchangers.
+    m_curr_filament_extruder.assign(std::max<size_t>(2, config.nozzle_diameter.size()), nullptr);
     m_filament_extruders.clear();
     m_filament_extruders.reserve(extruder_ids.size());
     for (unsigned int extruder_id : extruder_ids)

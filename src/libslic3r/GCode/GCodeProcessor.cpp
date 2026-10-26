@@ -1950,6 +1950,13 @@ void GCodeProcessor::apply_config(const PrintConfig& config)
     m_nozzle_volume.resize(config.nozzle_volume.size());
     for (size_t idx = 0; idx < config.nozzle_volume.size(); ++idx)
         m_nozzle_volume[idx] = config.nozzle_volume.values[idx];
+    // Per-extruder state has one slot per physical extruder: two on Bambu printers, more on
+    // toolchangers such as the Snapmaker U1.
+    const size_t extruders_count = std::max<size_t>({ size_t(2), config.nozzle_diameter.size(), m_nozzle_volume.size() });
+    m_nozzle_volume.resize(extruders_count, m_nozzle_volume.empty() ? 0.f : m_nozzle_volume.back());
+    m_remaining_volume.resize(extruders_count, 0.f);
+    m_filament_id.resize(extruders_count, static_cast<unsigned char>(-1));
+    m_last_filament_id.resize(extruders_count, static_cast<unsigned char>(-1));
 
     m_filament_nozzle_temp.resize(filament_count);
     for (size_t idx = 0; idx < filament_count; ++idx)
@@ -2078,6 +2085,14 @@ void GCodeProcessor::apply_config(const DynamicPrintConfig& config)
         m_nozzle_volume.resize(nozzle_volume->size(), 0);
         for (size_t idx = 0; idx < nozzle_volume->size(); ++idx)
             m_nozzle_volume[idx] = nozzle_volume->values[idx];
+    }
+    {
+        const ConfigOptionFloatsNullable *nozzle_diameter = config.option<ConfigOptionFloatsNullable>("nozzle_diameter");
+        const size_t extruders_count = std::max<size_t>({ size_t(2), nozzle_diameter ? nozzle_diameter->size() : size_t(0), m_nozzle_volume.size() });
+        m_nozzle_volume.resize(extruders_count, m_nozzle_volume.empty() ? 0.f : m_nozzle_volume.back());
+        m_remaining_volume.resize(extruders_count, 0.f);
+        m_filament_id.resize(extruders_count, static_cast<unsigned char>(-1));
+        m_last_filament_id.resize(extruders_count, static_cast<unsigned char>(-1));
     }
 
     const ConfigOptionIntsNullable* nozzle_temperature = config.option<ConfigOptionIntsNullable>("nozzle_temperature");
@@ -2490,7 +2505,7 @@ void GCodeProcessor::reset()
     m_e_local_positioning_type = EPositioningType::Absolute;
     m_extruder_offsets = std::vector<Vec3f>(MIN_EXTRUDERS_COUNT, Vec3f::Zero());
     m_flavor = gcfRepRapSprinter;
-    m_nozzle_volume = {0.f,0.f};
+    m_nozzle_volume.assign(std::max<size_t>(2, m_nozzle_volume.size()), 0.f);
 
     m_start_position = { 0.0f, 0.0f, 0.0f, 0.0f };
     m_end_position = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -2502,7 +2517,7 @@ void GCodeProcessor::reset()
     m_skippable = false;
     m_skippable_type = SkipType::stNone;
     m_wipe_tower = false;
-    m_remaining_volume = { 0.f,0.f };
+    m_remaining_volume.assign(std::max<size_t>(2, m_remaining_volume.size()), 0.f);
     // BBS: arc move related data
     m_move_path_type = EMovePathType::Noop_move;
     m_arc_center = Vec3f::Zero();
@@ -2521,8 +2536,8 @@ void GCodeProcessor::reset()
     m_extrusion_role = erNone;
 
     m_is_helio_gcode   = false;
-    m_filament_id = {static_cast<unsigned char>(-1),static_cast<unsigned char>(-1)};
-    m_last_filament_id = {static_cast<unsigned char>(-1),static_cast<unsigned char>(-1) };
+    m_filament_id.assign(std::max<size_t>(2, m_filament_id.size()), static_cast<unsigned char>(-1));
+    m_last_filament_id.assign(std::max<size_t>(2, m_last_filament_id.size()), static_cast<unsigned char>(-1));
     m_extruder_id = static_cast<unsigned char>(-1);
     m_extruder_colors.resize(MIN_EXTRUDERS_COUNT);
     for (size_t i = 0; i < MIN_EXTRUDERS_COUNT; ++i) {

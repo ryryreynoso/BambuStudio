@@ -1228,6 +1228,10 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
     bool has_scarf_joint_seam = false;
     {
         std::vector<int> scarf_seam_type = new_full_config.option<ConfigOptionEnumsGeneric>("filament_scarf_seam_type")->values;
+        // Profiles that do not define the option per filament leave a single value; use it for every
+        // filament (as ConfigOptionVector::get_at does) instead of reading past the end.
+        if (!scarf_seam_type.empty())
+            scarf_seam_type.resize(std::max(scarf_seam_type.size(), new_full_config.option<ConfigOptionFloats>("filament_diameter")->values.size()), scarf_seam_type.front());
         auto check_object_scarf_seam_type = [](const std::vector<int> scarf_seam_type, const ModelObject *mo) {
             //get filament scarf seam type
             if (!mo->printable)

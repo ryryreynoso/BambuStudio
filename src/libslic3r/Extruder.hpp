@@ -19,8 +19,8 @@ public:
     void   reset() {
         // BBS
         if (m_share_extruder) {
-            m_share_E = { 0.,0.};
-            m_share_retracted = { 0.,0. };
+            std::fill(m_share_E.begin(), m_share_E.end(), 0.);
+            std::fill(m_share_retracted.begin(), m_share_retracted.end(), 0.);
         } else {
             m_E             = 0;
             m_retracted     = 0;
