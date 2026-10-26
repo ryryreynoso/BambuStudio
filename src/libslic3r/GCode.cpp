@@ -2997,6 +2997,24 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     // Sync variant-mapped params into placeholder_parser before processing start gcode
     update_placeholder_parser_with_variant_params();
 
+    // Start G-code written for the Orca macro language (Snapmaker U1) reads the chamber cooling mode
+    // derived from the softening temperature of the plate's filaments, as Snapmaker Orca computes it.
+    if (m_placeholder_parser.uses_orca_macro_language()) {
+        int chamber_cooling_mode = 0; // keep warm
+        const std::vector<unsigned int> plate_extruders = print.is_sequential_print() ? print.extruders() : tool_ordering.all_extruders();
+        for (unsigned int extruder : plate_extruders) {
+            if (m_config.filament_is_high_temperature.get_at(extruder))
+                continue;
+            int vitrification = m_config.temperature_vitrification.get_at(extruder);
+            if (vitrification <= 50) {
+                chamber_cooling_mode = 2; // strong cooling
+                break;
+            } else if (vitrification <= 70)
+                chamber_cooling_mode = 1; // weak cooling
+        }
+        m_placeholder_parser.set("chamber_cooling_mode", new ConfigOptionInt(chamber_cooling_mode));
+    }
+
     std::string machine_start_gcode = this->placeholder_parser_process("machine_start_gcode", print.config().machine_start_gcode.value, initial_extruder_id);
     if (print.config().gcode_flavor != gcfKlipper) {
         // Set bed temperature if the start G-code does not contain any bed temp control G-codes.
@@ -3890,6 +3908,8 @@ void GCode::process_layers(
 std::string GCode::placeholder_parser_process(const std::string &name, const std::string &templ, unsigned int current_filament_id, const DynamicConfig *config_override)
 {
     try {
+        if (m_placeholder_parser.uses_orca_macro_language())
+            return this->placeholder_parser_process_with_outputs(templ, current_filament_id, config_override);
         return m_placeholder_parser.process(templ, current_filament_id, config_override, &m_placeholder_parser_context);
     } catch (std::runtime_error &err) {
         // Collect the names of failed template substitutions for error reporting.
@@ -3906,6 +3926,48 @@ std::string GCode::placeholder_parser_process(const std::string &name, const std
     }
 }
 
+
+// OrcaSlicer macro language: the script may write position[], e_retracted[] and e_restart_extra[]
+// (e.g. a tool change that raises Z). Mirror the changes into the G-code writer afterwards, as
+// OrcaSlicer's GCode::PlaceholderParserIntegration does.
+std::string GCode::placeholder_parser_process_with_outputs(const std::string &templ, unsigned int current_filament_id, const DynamicConfig *config_override)
+{
+    const Vec3d               pos_before = m_writer.get_position();
+    const auto               &extruders  = m_writer.extruders();
+    size_t                    n_slots    = 0;
+    for (const Extruder &e : extruders)
+        n_slots = std::max<size_t>(n_slots, e.id() + 1);
+    std::vector<double> retracted(n_slots, 0.), restart_extra(n_slots, 0.);
+    for (const Extruder &e : extruders) {
+        retracted[e.id()]     = e.retracted();
+        restart_extra[e.id()] = e.restart_extra();
+    }
+
+    DynamicConfig outputs;
+    outputs.set_key_value("position", new ConfigOptionFloats({pos_before.x(), pos_before.y(), pos_before.z()}));
+    outputs.set_key_value("e_retracted", new ConfigOptionFloats(retracted));
+    outputs.set_key_value("e_restart_extra", new ConfigOptionFloats(restart_extra));
+
+    std::string gcode = m_placeholder_parser.process(templ, current_filament_id, config_override, &outputs, &m_placeholder_parser_context);
+
+    const std::vector<double> &pos = outputs.option<ConfigOptionFloats>("position")->values;
+    const std::vector<double> &out_retracted = outputs.option<ConfigOptionFloats>("e_retracted")->values;
+    const std::vector<double> &out_restart   = outputs.option<ConfigOptionFloats>("e_restart_extra")->values;
+    if (pos.size() != 3)
+        throw Slic3r::RuntimeError("\"position\" output variable must not be resized by the script.");
+    if (out_retracted.size() != n_slots || out_restart.size() != n_slots)
+        throw Slic3r::RuntimeError("\"e_retracted\" and \"e_restart_extra\" output variables must not be resized by the script.");
+
+    if (pos[0] != pos_before.x() || pos[1] != pos_before.y() || pos[2] != pos_before.z()) {
+        Vec3d new_pos(pos[0], pos[1], pos[2]);
+        m_writer.set_position(new_pos);
+        this->set_last_pos(this->gcode_to_point({pos[0], pos[1]}));
+    }
+    for (const Extruder &e : extruders)
+        if (out_retracted[e.id()] != retracted[e.id()] || out_restart[e.id()] != restart_extra[e.id()])
+            const_cast<Extruder &>(e).set_retracted(out_retracted[e.id()], out_restart[e.id()]);
+    return gcode;
+}
 
 // Print the machine envelope G-code for the Marlin firmware based on the "machine_max_xxx" parameters.
 // Do not process this piece of G-code by the time estimator, it already knows the values through another sources.

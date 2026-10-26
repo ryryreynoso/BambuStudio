@@ -3095,6 +3095,12 @@ void PrintConfigDef::init_fff_params()
     def->mode = comDevelop;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def          = this->add("filament_is_high_temperature", coBools);
+    def->label   = L("Is high-temperature filament");
+    def->tooltip = L("Indicates whether this is a high-temperature filament that requires elevated printing temperatures.");
+    def->mode    = comDevelop;
+    def->set_default_value(new ConfigOptionBools{false});
+
     // BBS
     def = this->add("temperature_vitrification", coInts);
     def->label = L("Softening temperature");
@@ -3804,6 +3810,14 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Enable this if printer support cooling filter");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("gcode_macro_language", coString);
+    def->label = L("G-code macro language");
+    def->tooltip = L("Macro language of the printer's custom G-code. Empty uses Bambu Studio's macro language; "
+                     "\"orca\" uses the OrcaSlicer / PrusaSlicer 2.6 language (local and global variables, writable "
+                     "variables such as position[]), as required by profiles imported from Snapmaker Orca.");
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionString(""));
 
     def = this->add("gcode_flavor", coEnum);
     def->label = L("G-code flavor");

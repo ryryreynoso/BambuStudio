@@ -3,6 +3,7 @@
 
 #include "libslic3r.h"
 #include <map>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -20,6 +21,9 @@ public:
     // and shared between the PlaceholderParser::process() invocations.
     struct ContextData {
         std::mt19937 rng;
+        // Variables defined with "global" by scripts in the OrcaSlicer macro language, persisted
+        // between evaluations. Unused by Bambu Studio's own macro language.
+        std::unique_ptr<DynamicConfig> global_config;
     };
 
     PlaceholderParser(const DynamicConfig *external_config = nullptr);
@@ -53,6 +57,12 @@ public:
     // Fill in the template using a macro processing language.
     // Throws Slic3r::PlaceholderParserError on syntax or runtime error.
     std::string process(const std::string &templ, unsigned int current_extruder_id = 0, const DynamicConfig *config_override = nullptr, ContextData *context = nullptr) const;
+    // As above; with the OrcaSlicer macro language (see uses_orca_macro_language()), variables the
+    // script writes, such as position[], are returned in config_outputs.
+    std::string process(const std::string &templ, unsigned int current_extruder_id, const DynamicConfig *config_override, DynamicConfig *config_outputs, ContextData *context) const;
+    // True when the printer profile selects the OrcaSlicer / PrusaSlicer 2.6 macro language
+    // (gcode_macro_language = "orca"), used by profiles imported from Snapmaker Orca.
+    bool uses_orca_macro_language() const;
     
     // Evaluate a boolean expression using the full expressive power of the PlaceholderParser boolean expression syntax.
     // Throws Slic3r::PlaceholderParserError on syntax or runtime error.

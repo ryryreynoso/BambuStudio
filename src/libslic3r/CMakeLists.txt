@@ -318,6 +318,8 @@ set(lisbslic3r_sources
     OverhangDetector.hpp
     OverhangDetector.cpp
     PlaceholderParser.cpp
+    PlaceholderParserOrca.cpp
+    PlaceholderParserOrca.hpp
     PlaceholderParser.hpp
     Platform.cpp
     Platform.hpp

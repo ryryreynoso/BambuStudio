@@ -65,6 +65,18 @@ public:
     bool is_share_extruder() const { return m_share_extruder; }
     double get_single_retracted_length() const { return m_retracted; }
     double get_share_retracted_length() const { return m_share_retracted[extruder_id()]; }
+    // Current retraction and restart-extra state, readable and writable by custom G-code written in
+    // the OrcaSlicer macro language (e_retracted[], e_restart_extra[]).
+    double retracted() const { return m_share_extruder ? m_share_retracted[extruder_id()] : m_retracted; }
+    double restart_extra() const { return m_restart_extra; }
+    void   set_retracted(double retracted, double restart_extra)
+    {
+        if (m_share_extruder)
+            m_share_retracted[extruder_id()] = retracted;
+        else
+            m_retracted = retracted;
+        m_restart_extra = restart_extra;
+    }
 
 private:
     // Private constructor to create a key for a search in std::set.

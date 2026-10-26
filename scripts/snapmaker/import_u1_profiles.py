@@ -14,6 +14,9 @@ import shutil
 import sys
 
 KINDS = ("machine", "process", "filament")
+# Snapmaker's G-code templates use the OrcaSlicer macro language (local variables, writable
+# position[] and so on); this printer setting selects that engine for every Snapmaker machine.
+MACRO_LANGUAGE_BASE = "fdm_klipper"
 
 
 def load(path):
@@ -68,7 +71,15 @@ def main():
     for kind in KINDS:
         for item in vendor[kind + "_list"]:
             if item["name"] in wanted:
-                shutil.copy(os.path.join(src, "Snapmaker", item["sub_path"]), os.path.join(out_dir, item["sub_path"]))
+                dst_path = os.path.join(out_dir, item["sub_path"])
+                if item["name"] == MACRO_LANGUAGE_BASE:
+                    data = dict(entries[item["name"]][2])
+                    data["gcode_macro_language"] = "orca"
+                    with open(dst_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=4)
+                        f.write("\n")
+                else:
+                    shutil.copy(os.path.join(src, "Snapmaker", item["sub_path"]), dst_path)
                 index[kind + "_list"].append(item)
 
     # Bed model, bed texture and cover images referenced by the U1 model and machines.

@@ -224,6 +224,7 @@ public:
     // Process a template through the placeholder parser, collect error messages to be reported
     // inside the generated string and after the G-code export finishes.
     std::string     placeholder_parser_process(const std::string &name, const std::string &templ, unsigned int current_extruder_id, const DynamicConfig *config_override = nullptr);
+    std::string     placeholder_parser_process_with_outputs(const std::string &templ, unsigned int current_filament_id, const DynamicConfig *config_override);
     bool            enable_cooling_markers() const { return m_enable_cooling_markers; }
 
     // For Perl bindings, to be used exclusively by unit tests.

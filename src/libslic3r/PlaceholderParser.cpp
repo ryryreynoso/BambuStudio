@@ -1,4 +1,5 @@
 #include "PlaceholderParser.hpp"
+#include "PlaceholderParserOrca.hpp"
 #include "Exception.hpp"
 #include "Flow.hpp"
 #include <cstring>
@@ -1531,8 +1532,26 @@ static std::string process_macro(const std::string &templ, client::MyContext &co
     return output;
 }
 
+bool PlaceholderParser::uses_orca_macro_language() const
+{
+    const ConfigOption *opt = m_config.option("gcode_macro_language");
+    if (opt == nullptr && m_external_config != nullptr)
+        opt = m_external_config->option("gcode_macro_language");
+    const auto *str = dynamic_cast<const ConfigOptionString *>(opt);
+    return str != nullptr && str->value == "orca";
+}
+
+std::string PlaceholderParser::process(const std::string &templ, unsigned int current_extruder_id, const DynamicConfig *config_override, DynamicConfig *config_outputs, ContextData *context_data) const
+{
+    if (this->uses_orca_macro_language())
+        return orca_macro::process(*this, templ, current_extruder_id, config_override, config_outputs, context_data);
+    return this->process(templ, current_extruder_id, config_override, context_data);
+}
+
 std::string PlaceholderParser::process(const std::string &templ, unsigned int current_extruder_id, const DynamicConfig *config_override, ContextData *context_data) const
 {
+    if (this->uses_orca_macro_language())
+        return orca_macro::process(*this, templ, current_extruder_id, config_override, nullptr, context_data);
     client::MyContext context;
     context.external_config 	= this->external_config();
     context.config              = &this->config();
