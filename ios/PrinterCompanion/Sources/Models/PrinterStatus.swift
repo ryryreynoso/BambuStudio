@@ -19,6 +19,9 @@ struct PrinterStatus: Equatable {
     var totalLayers: Int?
     var heaters: [Heater] = []
     var message: String?
+    /// Active printer errors, when the printer reports them (Snapmaker's `exception_manager`).
+    /// nil means the printer has no error list; an empty array means it reports none.
+    var errors: [String]?
 }
 
 extension PrinterStatus {
@@ -73,7 +76,27 @@ extension PrinterStatus {
         if let bed = objects["heater_bed"] as? [String: Any] {
             updated.updateHeater("Bed", current: Self.number(bed["temperature"]), target: Self.number(bed["target"]))
         }
+        if let manager = objects["exception_manager"] as? [String: Any] {
+            updated.errors = (manager["exceptions"] as? [Any] ?? []).map(Self.describeException)
+        }
         self = updated
+    }
+
+    /// Snapmaker does not document its exception entries, so this shows whatever text an entry has,
+    /// with its code and level when present.
+    static func describeException(_ entry: Any) -> String {
+        guard let fields = entry as? [String: Any] else { return "\(entry)" }
+        let text = ["message", "msg", "description", "name"].lazy.compactMap { fields[$0] as? String }.first { !$0.isEmpty }
+        let details = ["code", "id", "level", "module", "index"].compactMap { key -> String? in
+            guard let value = fields[key], !(value is NSNull) else { return nil }
+            return "\(key) \(value)"
+        }
+        switch (text, details.isEmpty) {
+        case let (text?, true): return text
+        case let (text?, false): return "\(text) (\(details.joined(separator: ", ")))"
+        case (nil, false): return "Error " + details.joined(separator: ", ")
+        case (nil, true): return "\(fields)"
+        }
     }
 
     mutating func updateHeater(_ name: String, current: Double?, target: Double?) {

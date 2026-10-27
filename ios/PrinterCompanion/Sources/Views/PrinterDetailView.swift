@@ -5,6 +5,28 @@ struct PrinterDetailView: View {
 
     var body: some View {
         List {
+            if let errors = monitor.status.errors {
+                Section("Errors") {
+                    if errors.isEmpty {
+                        Label("No errors", systemImage: "checkmark.circle").foregroundStyle(.green)
+                    }
+                    ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
+                        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                    }
+                }
+            }
+            if let data = monitor.cameraImage, let image = UIImage(data: data) {
+                Section("Camera") {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let date = monitor.cameraUpdate {
+                        Text("Picture from \(date.formatted(date: .omitted, time: .standard))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             Section("Status") {
                 LabeledContent("Connection", value: monitor.connection)
                 LabeledContent("State", value: monitor.status.state)

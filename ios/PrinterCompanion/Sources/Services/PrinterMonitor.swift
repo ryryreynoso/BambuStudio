@@ -6,6 +6,9 @@ final class PrinterMonitor: ObservableObject {
     @Published private(set) var status = PrinterStatus()
     @Published private(set) var connection = "Connecting..."
     @Published private(set) var lastUpdate: Date?
+    /// Latest camera picture (JPEG) and when it was fetched; Moonraker printers only.
+    @Published private(set) var cameraImage: Data?
+    @Published private(set) var cameraUpdate: Date?
 
     let printer: PrinterConfig
     private var pollTask: Task<Void, Never>?
@@ -40,6 +43,10 @@ final class PrinterMonitor: ObservableObject {
                     self?.lastUpdate = Date()
                 } catch {
                     self?.connection = error.localizedDescription
+                }
+                if let image = try? await client.fetchCameraImage() {
+                    self?.cameraImage = image
+                    self?.cameraUpdate = Date()
                 }
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }

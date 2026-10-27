@@ -80,6 +80,20 @@ final class PrinterStatusTests: XCTestCase {
     func testMoonrakerURL() {
         XCTAssertEqual(MoonrakerClient(host: "192.168.1.20").statusURL?.absoluteString.hasPrefix("http://192.168.1.20/printer/objects/query?print_stats"), true)
         XCTAssertEqual(MoonrakerClient(host: "http://u1.local:7125/").statusURL?.host, "u1.local")
+        XCTAssertEqual(MoonrakerClient(host: "10.0.1.4").cameraURL?.absoluteString, "http://10.0.1.4/server/files/camera/monitor.jpg")
+    }
+
+    func testSnapmakerErrors() throws {
+        var status = PrinterStatus()
+        try status.applyMoonraker(Data(#"{"result":{"status":{"print_stats":{"state":"standby"}}}}"#.utf8))
+        XCTAssertNil(status.errors, "a printer without exception_manager has no error list")
+
+        try status.applyMoonraker(Data(#"{"result":{"status":{"exception_manager":{"exceptions":[]}}}}"#.utf8))
+        XCTAssertEqual(status.errors, [])
+
+        let reply = #"{"result":{"status":{"exception_manager":{"exceptions":[{"message":"Filament runout","code":2101,"level":2},{"code":523},"raw"]}}}}"#
+        try status.applyMoonraker(Data(reply.utf8))
+        XCTAssertEqual(status.errors, ["Filament runout (code 2101, level 2)", "Error code 523", "raw"])
     }
 
     func testBambuCertificatesDecode() {
