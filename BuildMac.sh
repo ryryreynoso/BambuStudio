@@ -79,6 +79,10 @@ if [ -z "$OSX_DEPLOYMENT_TARGET" ]; then
   export OSX_DEPLOYMENT_TARGET="10.15"
 fi
 
+# Name of the packaged app under build/<arch>/BambuStudio/. The build itself
+# still produces src/BambuStudio.app; only the copy is renamed.
+APP_BUNDLE="3D Print.app"
+
 echo "Build params:"
 echo " - ARCH: $ARCH"
 echo " - BUILD_CONFIG: $BUILD_CONFIG"
@@ -178,18 +182,18 @@ function build_slicer() {
             mkdir -p BambuStudio
             cd BambuStudio
             # remove previously built app
-            rm -rf ./BambuStudio.app
+            rm -rf "./$APP_BUNDLE"
             # fully copy newly built app
-            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/BambuStudio.app" ./BambuStudio.app
+            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/BambuStudio.app" "./$APP_BUNDLE"
             # copy standalone dSYM symbol bundle if present (Release only)
-            rm -rf ./BambuStudio.app.dSYM
-            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/BambuStudio.app.dSYM" ./BambuStudio.app.dSYM 2>/dev/null || true
+            rm -rf "./$APP_BUNDLE.dSYM"
+            cp -pR "../src$BUILD_DIR_CONFIG_SUBDIR/BambuStudio.app.dSYM" "./$APP_BUNDLE.dSYM" 2>/dev/null || true
             # fix resources
-            resources_path=$(readlink ./BambuStudio.app/Contents/Resources)
-            rm ./BambuStudio.app/Contents/Resources
-            cp -R "$resources_path" ./BambuStudio.app/Contents/Resources
+            resources_path=$(readlink "./$APP_BUNDLE/Contents/Resources")
+            rm "./$APP_BUNDLE/Contents/Resources"
+            cp -R "$resources_path" "./$APP_BUNDLE/Contents/Resources"
             # delete .DS_Store file
-            find ./BambuStudio.app/ -name '.DS_Store' -delete
+            find "./$APP_BUNDLE/" -name '.DS_Store' -delete
         )
 
     fi
@@ -205,25 +209,25 @@ function build_universal() {
     echo "Creating universal binary..."
     # PROJECT_BUILD_DIR="$PROJECT_DIR/build_Universal"
     mkdir -p "$PROJECT_BUILD_DIR/BambuStudio"
-    UNIVERSAL_APP="$PROJECT_BUILD_DIR/BambuStudio/BambuStudio.app"
+    UNIVERSAL_APP="$PROJECT_BUILD_DIR/BambuStudio/$APP_BUNDLE"
     rm -rf "$UNIVERSAL_APP"
-    cp -R "$PROJECT_DIR/build/arm64/BambuStudio/BambuStudio.app" "$UNIVERSAL_APP"
+    cp -R "$PROJECT_DIR/build/arm64/BambuStudio/$APP_BUNDLE" "$UNIVERSAL_APP"
     
     # Get the binary path inside the .app bundle
     BINARY_PATH="Contents/MacOS/BambuStudio"
     
     # Create universal binary using lipo
     lipo -create \
-        "$PROJECT_DIR/build/x86_64/BambuStudio/BambuStudio.app/$BINARY_PATH" \
-        "$PROJECT_DIR/build/arm64/BambuStudio/BambuStudio.app/$BINARY_PATH" \
+        "$PROJECT_DIR/build/x86_64/BambuStudio/$APP_BUNDLE/$BINARY_PATH" \
+        "$PROJECT_DIR/build/arm64/BambuStudio/$APP_BUNDLE/$BINARY_PATH" \
         -output "$UNIVERSAL_APP/$BINARY_PATH"
 
     echo "Universal binary created at $UNIVERSAL_APP"
 
     # Create universal dSYM by merging the per-arch DWARF (Release only)
-    UNIVERSAL_DSYM="$PROJECT_BUILD_DIR/BambuStudio/BambuStudio.app.dSYM"
-    ARM64_DSYM="$PROJECT_DIR/build/arm64/BambuStudio/BambuStudio.app.dSYM"
-    X86_64_DSYM="$PROJECT_DIR/build/x86_64/BambuStudio/BambuStudio.app.dSYM"
+    UNIVERSAL_DSYM="$PROJECT_BUILD_DIR/BambuStudio/$APP_BUNDLE.dSYM"
+    ARM64_DSYM="$PROJECT_DIR/build/arm64/BambuStudio/$APP_BUNDLE.dSYM"
+    X86_64_DSYM="$PROJECT_DIR/build/x86_64/BambuStudio/$APP_BUNDLE.dSYM"
     DWARF_PATH="Contents/Resources/DWARF/BambuStudio"
     if [ -d "$ARM64_DSYM" ] && [ -d "$X86_64_DSYM" ]; then
         echo "Creating universal dSYM..."

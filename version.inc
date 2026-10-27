@@ -3,6 +3,10 @@
 
 set(SLIC3R_APP_NAME "BambuStudio")
 set(SLIC3R_APP_KEY "BambuStudio")
+# Name and bundle ID macOS shows for this fork, so it is told apart from Bambu Studio.
+# SLIC3R_APP_NAME / SLIC3R_APP_KEY stay as they are: Bambu's services and the data folder use them.
+set(SLIC3R_APP_DISPLAY_NAME "3D Print")
+set(SLIC3R_APP_BUNDLE_ID "com.ryryreynoso.3dprint")
 
 if(NOT DEFINED BBL_RELEASE_TO_PUBLIC)
 set(BBL_RELEASE_TO_PUBLIC "0")
