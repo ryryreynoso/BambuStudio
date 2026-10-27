@@ -36,6 +36,17 @@ def load(path):
         return json.load(f)
 
 
+def copy_without_bom(src_path, dst_path):
+    # Some Snapmaker profiles start with a UTF-8 byte-order mark, which Bambu Studio's profile
+    # loader rejects ("Failed loading configuration file").
+    with open(src_path, "rb") as f:
+        data = f.read()
+    if data.startswith(b"\xef\xbb\xbf"):
+        data = data[3:]
+    with open(dst_path, "wb") as f:
+        f.write(data)
+
+
 def is_u1(data):
     if "U1" in data.get("name", ""):
         return True
@@ -91,7 +102,7 @@ def main():
                         json.dump(data, f, indent=4)
                         f.write("\n")
                 else:
-                    shutil.copy(os.path.join(src, "Snapmaker", item["sub_path"]), dst_path)
+                    copy_without_bom(os.path.join(src, "Snapmaker", item["sub_path"]), dst_path)
                 index[kind + "_list"].append(item)
 
     # Bed model, bed texture and cover images referenced by the U1 model and machines.
