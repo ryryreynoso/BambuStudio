@@ -1,8 +1,8 @@
 # Snapmaker U1 support in Bambu Studio
 
 Slicing for the Snapmaker U1 (Klipper, four toolheads) inside Bambu Studio, and sending jobs to it
-over the local network through Moonraker, without changing how Bambu Lab printers slice. Snapmaker
-account sign-in is a separate step that is not done yet.
+over the local network through Moonraker, and Snapmaker account sign-in through Snapmaker's own
+helper, without changing how Bambu Lab printers slice or how Bambu accounts work.
 
 ## What was added
 
@@ -13,6 +13,8 @@ account sign-in is a separate step that is not done yet.
 | Template variables | Exposed only when the Orca macro language is selected:<br>• `chamber_cooling_mode`, computed from the softening temperature of the plate's filaments as Snapmaker Orca does; this uses the new filament option `filament_is_high_temperature`.<br>• `temperature`, an alias of `nozzle_temperature`.<br>• `travel_speed` as a single number. Bambu stores it per extruder variant, and the U1 tool-change macro compares it with a number. |
 | More than two extruders | Bambu assumes at most two physical extruders. These now size by the printer instead, with a minimum of two so Bambu printers are unchanged:<br>• filament grouping uses an identity tool map for toolchangers;<br>• the G-code writer's active-filament slots and `Extruder`'s shared E and retraction slots;<br>• `GCodeProcessor`'s per-extruder volume and filament state;<br>• the per-layer filament ordering, which dropped every filament on extruders 3 and 4;<br>• extruders without their own height limit use `printable_height`. |
 | Network printing | New print host type `moonraker` (`src/slic3r/Utils/Moonraker.cpp`, adapted from Snapmaker Orca, AGPL-3.0). The connection test reads `printer/info`; the upload posts the G-code to `server/files/upload` (root `gcodes`) and sets `print=true` only when the user picks **Upload and Print**. If no port was entered and the host does not answer, port 8080 is tried, as Snapmaker Orca does. The U1 machine profiles use it. The connection dialog now keeps the printer profile's host type instead of always switching to OctoPrint. |
+| Idle tools (ooze prevention) | With `ooze_prevention` on and the OrcaSlicer macro language, a tool is set to its standby temperature (`standby_temperature_delta`, −150 °C on the U1 profiles) when it is put down. No skirt is needed, matching OrcaSlicer; Bambu's skirt-based version still applies to other printers. `GCodeProcessor` adds `M104 T<n> S<temp> ; preheat next tool` `preheat_time` seconds (new option, default 30 s) before each tool change, but never before that tool was put down. The tool change still waits with `M109`, so a tool can never print cold, even if a preheat is late. |
+| Snapmaker account | **File → Snapmaker Account and Devices...** starts Snapmaker's connection helper (`snapmaker_control_<platform>`), the program Snapmaker Orca uses for sign-in, cloud devices and remote printing. Bambu Studio does not ship it: it uses the copy installed with Snapmaker Orca (`/Applications/Snapmaker Orca.app/Contents/Resources` on macOS), or one chosen with **Helper location...**. The dialog shows the helper's own sign-in and device pages and the signed-in name. The helper keeps the login and token. Bambu Studio neither sees nor stores Snapmaker passwords or tokens; it drops the token from the helper's account reply. The helper is stopped when Bambu Studio exits. Process start-up and account parsing are vendored unchanged from Snapmaker Orca (`Utils/SnapmakerGateway/`, AGPL-3.0). Bambu Lab sign-in is untouched. |
 | Robustness | `Print::apply` no longer reads past a single-valued `filament_scarf_seam_type`. |
 
 ## Sending a job to the U1
@@ -20,6 +22,12 @@ account sign-in is a separate step that is not done yet.
 1. Select a Snapmaker U1 printer and click the connection button next to it.
 2. Enter the U1's IP address (host type Moonraker is preselected) and use **Test** to check it.
 3. Slice, then use **Print → Send** and choose **Upload** or **Upload and Print**.
+
+## Signing in to Snapmaker
+
+1. Install Snapmaker Orca, which installs the helper.
+2. In Bambu Studio, choose **File → Snapmaker Account and Devices...**.
+3. Sign in on the page that opens. The **Devices** page lists your Snapmaker cloud printers.
 
 ## Testing
 
@@ -34,7 +42,23 @@ with cube *i* assigned to filament *i*. It fails if:
 `MOONRAKER_TEST_HOST=127.0.0.1:<port> full_spectrum_tests "[Moonraker]"` tests the connection
 and uploads a file twice, once with each post-upload action.
 
-Results on the Linux build (2026-10-26):
+`scripts/snapmaker/fake_snapmaker_helper.py` stands in for Snapmaker's helper: it prints the same
+`PORT:` frame and serves `/api/health`, `/api/account` and two pages. With
+`FAKE_SNAPMAKER_HELPER=<path>`, `full_spectrum_tests "[SnapmakerConnect]"` starts it through the
+real code, reads its pages and account (signed in or not), and stops it.
+
+The `u1` check also verifies ooze prevention. Each tool must go on standby when put down, be
+preheated (or be on its first use) before it is selected again, and never be preheated while in
+use.
+
+Results on the Linux build (2026-10-27):
+
+* `u1`: OK, two runs. 226 tool changes, each cube printed only by its own tool. 225 standby
+  commands at 70 °C and 225 preheats, all in the right order.
+* `[SnapmakerConnect]` against the fake helper: all pass, signed in and signed out; no helper
+  process is left running.
+
+Earlier results (2026-10-26):
 
 * `u1`: OK. 226 tool changes, each cube printed only by its own tool, slicing returns "Success".
 * `regress`: X1 Carbon output from this build matches the unmodified build. Ignoring `M73` and
@@ -56,10 +80,14 @@ Results on the Linux build (2026-10-26):
 * **Moonraker host tested only against a mock.** It has not reached a real U1. Snapmaker printers
   may require authorization that the mock does not; the host sends `printhost_apikey` as
   `X-Api-Key` when one is entered.
-* **Ooze prevention does nothing.** Bambu's implementation is the older PrusaSlicer one and only
-  works when a skirt is printed, which the U1 profiles do not do. Idle tools therefore stay at
-  printing temperature. Snapmaker Orca drops idle tools to standby instead
-  (`standby_temperature_delta`, `preheat_time`).
+* **Preheat timing is estimated.** The 30 s lead uses Bambu's print-time estimate. If the estimate
+  is optimistic, the tool change waits longer for `M109`; it never prints cold. Snapmaker's
+  per-filament `idle_temperature` is not read; the standby temperature comes from
+  `standby_temperature_delta`.
+* **Snapmaker sign-in tested only against a stand-in.** Snapmaker's real helper is proprietary and
+  was not available here. Its behaviour was taken from Snapmaker Orca's source, which is the only
+  reference. Live notifications over the helper's websocket are not used; the account is polled
+  every 3 s while the dialog is open.
 * **No prime tower.** Bambu's wipe tower is designed for one nozzle fed by an AMS. It is off in
   the U1 profiles, and Bambu refuses to combine it with ooze prevention.
 * **`travel_speed` workaround.** Snapmaker Orca's macro engine also rejects a list where one
@@ -69,5 +97,4 @@ Results on the Linux build (2026-10-26):
 
 ## Next steps
 
-1. Snapmaker account sign-in through the official `snapmaker_control` helper installed with
-   Snapmaker Orca.
+* First prints on a real U1, watched, before relying on the output.

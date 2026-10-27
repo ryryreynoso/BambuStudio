@@ -1230,7 +1230,8 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
             }
         const auto by_gcode_id = [](const GCodeProcessorResult::MoveVertex &move, unsigned int gcode_id) { return move.gcode_id < gcode_id; };
         const unsigned int start_end = machine_start_gcode_end_line_id == (unsigned int)(-1) ? 0 : machine_start_gcode_end_line_id;
-        const size_t tool_count = context.physical_extruder_map.empty() ? context.filament_nozzle_temp.size() : context.physical_extruder_map.size();
+        // The tool-change macro selects T<filament index>, so any filament index is a valid tool.
+        const size_t tool_count = context.filament_nozzle_temp.size();
         std::map<int, unsigned int> put_down_at; // filament -> line where its tool was last put down
         for (size_t i = 1; i < filament_blocks.size(); ++i) {
             const auto &prev = filament_blocks[i - 1];

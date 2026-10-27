@@ -162,7 +162,18 @@ color catalogue (`FilamentColorLibrary`), Snapmaker device code, U1 profiles.
   (flattened by `flatten_bbl_preset.py`) and checks the filament printed on every layer, and runs
   the before/after regression against an unmodified build.
 
-### Results (Linux build of this branch, 2026-10-24)
+### Results (Linux build of this branch, 2026-10-27)
+
+* `full_spectrum_tests`: **87 test cases, 26,339 assertions, all pass**. This includes the
+  Moonraker host and Snapmaker helper tests.
+* `cycle`: OK, every layer prints the filament the `1/1/2` pattern prescribes.
+* Sub-layer infill toggle, 75/25 mix at 0.20 mm: with `mixed_color_sublayer_infill` on, sparse
+  infill prints in both passes (z 9.95 and 10.00). With it off, it prints once per layer at
+  z 10.00 with normal flow.
+* Regression (X1 Carbon, filament 1 and 2): output identical to one of the two variants the
+  unmodified build itself produces, ignoring `M73` and `F` values.
+
+### Results (2026-10-24)
 
 * `full_spectrum_tests` against the real libslic3r: **83 test cases, 26,327 assertions, all pass**
   (includes the 64 ported upstream Full Spectrum core cases).

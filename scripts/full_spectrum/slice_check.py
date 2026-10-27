@@ -192,6 +192,16 @@ def check_u1(binary, workdir):
     gcode = slice_(binary, workdir, machine, process, filaments, cube, "1,2,3,4", [], models=[cube] * 4)
 
     tool, heated, problems = None, set(), []
+    # Ooze prevention (standby + preheat): per tool, a standby M104 must be followed by a preheat
+    # before the tool is selected again; a preheat must never come before the standby it undoes.
+    standby_temp = None
+    state = {}  # tool -> "standby" | "preheated"
+    standby_count = preheat_count = 0
+    proc = json.load(open(process))
+    filament_temp = int(json.load(open(filaments[0]))["nozzle_temperature"][0])
+    delta = int(proc.get("standby_temperature_delta", 0))
+    if str(proc.get("ooze_prevention", "0")) == "1" and delta != 0:
+        standby_temp = filament_temp + delta
     objects = {}  # object index -> set of tools that printed it
     changes = 0
     for n, line in enumerate(open(gcode, errors="replace"), 1):
@@ -201,6 +211,18 @@ def check_u1(binary, workdir):
         m = re.match(r"^M10[49] (?:S\d+ T(\d+)|T(\d+) S\d+)", line)
         if m:
             heated.add(int(m.group(1) or m.group(2)))
+        m = re.match(r"^M104 S(\d+) T(\d+) ; set nozzle temperature$", line)
+        if m and tool is not None and int(m.group(2)) == tool and standby_temp is not None and int(m.group(1)) == standby_temp:
+            state[tool] = "standby"
+            standby_count += 1
+        m = re.match(r"^M104 T(\d+) S(\d+) ; preheat next tool$", line)
+        if m:
+            t = int(m.group(1))
+            # Allowed before a tool's first use (the start G-code leaves it off) or after its standby.
+            if state.get(t) not in (None, "standby"):
+                problems.append("line %d: T%d preheated while it was not on standby" % (n, t))
+            state[t] = "preheated"
+            preheat_count += 1
         m = re.match(r"^T(\d+)$", line)
         if m:
             t = int(m.group(1))
@@ -210,11 +232,18 @@ def check_u1(binary, workdir):
                 changes += 1
                 if t not in heated:
                     problems.append("line %d: T%d selected before it was heated" % (n, t))
+                if state.get(t) == "standby":
+                    problems.append("line %d: T%d selected without a preheat after standby" % (n, t))
+                state[t] = "active"
             tool = t
         m = re.match(r"^EXCLUDE_OBJECT_START NAME=cube\.stl_id_(\d+)_", line)
         if m:
             objects.setdefault(int(m.group(1)), set()).add(tool)
     print("tool changes: %d, tools per object: %s" % (changes, {k: sorted(v) for k, v in sorted(objects.items())}))
+    if standby_temp is not None:
+        print("ooze prevention: %d standby commands at %d C, %d preheats" % (standby_count, standby_temp, preheat_count))
+        if standby_count == 0 or preheat_count == 0:
+            problems.append("ooze prevention is on but no standby/preheat commands were found")
     for obj, tools in sorted(objects.items()):
         if tools != {obj}:
             problems.append("cube %d printed by tools %s, expected only T%d" % (obj, sorted(tools), obj))
