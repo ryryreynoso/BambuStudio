@@ -1,17 +1,26 @@
 // Draws the "3D Print" app icon: a nozzle laying down a stack of rainbow
 // layers (the Full Spectrum colour mixing) on a dark rounded square.
-// Usage: swift scripts/icon/make_icon.swift <out.png> [size]
+// Usage: swift scripts/icon/make_icon.swift <out.png> [size] [ios]
+// "ios" draws the same design full-bleed and opaque, as App Store icons must be (iOS rounds the
+// corners itself).
 import AppKit
 
 let args = CommandLine.arguments
 let outPath = args.count > 1 ? args[1] : "icon_1024.png"
 let size = CGFloat(args.count > 2 ? Double(args[2])! : 1024)
+let ios = args.count > 3 && args[3] == "ios"
 let s = size / 1024
 
 let cs = CGColorSpace(name: CGColorSpace.sRGB)!
 let ctx = CGContext(data: nil, width: Int(size), height: Int(size), bitsPerComponent: 8,
                     bytesPerRow: 0, space: cs,
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    bitmapInfo: (ios ? CGImageAlphaInfo.noneSkipLast : CGImageAlphaInfo.premultipliedLast).rawValue)!
+if ios {
+    // Scale the 824 pt macOS tile up to the whole square.
+    ctx.translateBy(x: size / 2, y: size / 2)
+    ctx.scaleBy(x: 1024 / 824, y: 1024 / 824)
+    ctx.translateBy(x: -size / 2, y: -size / 2)
+}
 
 func rgb(_ hex: UInt32, _ a: CGFloat = 1) -> CGColor {
     CGColor(red: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
@@ -23,9 +32,10 @@ func r(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
 
 // Background: macOS icon grid (824 pt tile inside 1024, radius ~185), dark navy-to-plum gradient.
 let tile = r(100, 100, 824, 824)
-let tilePath = CGPath(roundedRect: tile, cornerWidth: 185 * s, cornerHeight: 185 * s, transform: nil)
+let radius: CGFloat = ios ? 0 : 185 * s
+let tilePath = CGPath(roundedRect: tile, cornerWidth: radius, cornerHeight: radius, transform: nil)
 ctx.saveGState()
-ctx.setShadow(offset: CGSize(width: 0, height: -10 * s), blur: 28 * s, color: rgb(0x000000, 0.35))
+if !ios { ctx.setShadow(offset: CGSize(width: 0, height: -10 * s), blur: 28 * s, color: rgb(0x000000, 0.35)) }
 ctx.addPath(tilePath); ctx.setFillColor(rgb(0x1a1d3a)); ctx.fillPath()
 ctx.restoreGState()
 ctx.saveGState()
