@@ -791,6 +791,9 @@ namespace Slic3r {
             std::vector<int> extruder_max_nozzle_count { 1 };
             std::vector<ExtruderType> extruder_types;
             std::vector<double> nozzle_diameter;
+            // Toolchanger ooze prevention (OrcaSlicer macro language): heat each tool back from standby
+            // this many seconds before it is selected. 0 disables it.
+            float toolchanger_preheat_time{ 0.f };
 
             TimeProcessContext(
                 const UsedFilaments& used_filaments_,
@@ -845,6 +848,7 @@ namespace Slic3r {
                 ExtruderChangePredict,
                 PreCooling,
                 PreHeating,
+                ToolchangerPreheat,
             };
 
             // first key is line id ,second key is content
@@ -1161,6 +1165,7 @@ namespace Slic3r {
         std::vector<int> m_filament_pre_cooling_temp{ 0 };
         std::vector<double> m_filament_preheat_temperature_delta;
         bool m_enable_pre_heating{ false };
+        float m_toolchanger_preheat_time{ 0.f };
         bool m_handle_hotend_as_extruder { false };
         bool m_has_filament_switcher{ false };
         std::vector<int> m_physical_extruder_map;

@@ -1217,6 +1217,50 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
         pre_cooling_injector->process_pre_cooling_and_heating(inserted_operation_lines);
     }
 
+    if (context.toolchanger_preheat_time > 0.f && !moves.empty() && filament_blocks.size() > 1) {
+        // Toolchanger ooze prevention, as OrcaSlicer does it: GCode drops a tool to standby when it is
+        // put down and waits (M109) for the next one at the tool change. Heat each tool back up
+        // preheat_time seconds earlier, but never before the tool was put down, so the wait is short.
+        // The tool number is the filament index (one filament per tool), as in the tool-change macro.
+        size_t machine_id = 0;
+        for (size_t i = 0; i < static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Count); ++i)
+            if (machines[i].enabled) {
+                machine_id = i;
+                break;
+            }
+        const auto by_gcode_id = [](const GCodeProcessorResult::MoveVertex &move, unsigned int gcode_id) { return move.gcode_id < gcode_id; };
+        const unsigned int start_end = machine_start_gcode_end_line_id == (unsigned int)(-1) ? 0 : machine_start_gcode_end_line_id;
+        const size_t tool_count = context.physical_extruder_map.empty() ? context.filament_nozzle_temp.size() : context.physical_extruder_map.size();
+        std::map<int, unsigned int> put_down_at; // filament -> line where its tool was last put down
+        for (size_t i = 1; i < filament_blocks.size(); ++i) {
+            const auto &prev = filament_blocks[i - 1];
+            const auto &next = filament_blocks[i];
+            put_down_at[prev.filament_id] = next.lower_gcode_id;
+            if (next.filament_id == prev.filament_id || next.filament_id < 0 || size_t(next.filament_id) >= tool_count ||
+                size_t(next.filament_id) >= context.filament_nozzle_temp.size())
+                continue;
+            const int temp = context.filament_nozzle_temp[next.filament_id];
+            if (temp <= 0)
+                continue;
+            auto change = std::lower_bound(moves.begin(), moves.end(), next.lower_gcode_id, by_gcode_id);
+            if (change == moves.begin())
+                continue;
+            const float change_time = std::prev(change)->time[machine_id];
+            const float start_time  = change_time - context.toolchanger_preheat_time;
+            auto heat = std::lower_bound(moves.begin(), change, start_time,
+                                         [machine_id](const GCodeProcessorResult::MoveVertex &move, float time) { return move.time[machine_id] < time; });
+            unsigned int line = heat == change ? std::prev(change)->gcode_id : heat->gcode_id;
+            const auto   down = put_down_at.find(next.filament_id);
+            const unsigned int earliest = down != put_down_at.end() ? down->second : start_end;
+            if (line < earliest)
+                line = earliest;
+            if (line >= next.lower_gcode_id)
+                continue; // nothing to gain; the tool change heats and waits itself
+            inserted_operation_lines[line].emplace_back("M104 T" + std::to_string(next.filament_id) + " S" + std::to_string(temp) + " ; preheat next tool\n",
+                                                        InsertLineType::ToolchangerPreheat);
+        }
+    }
+
     auto pre_operation_iter = inserted_operation_lines.begin();
     auto filament_change_handle = [&inserted_operation_lines, &pre_operation_iter,enable_pre_heating = context.enable_pre_heating](std::string& gcode_line, std::string& gcode_buffer, int line_id) {
         if (pre_operation_iter == inserted_operation_lines.end())
@@ -1237,6 +1281,7 @@ void GCodeProcessor::TimeProcessor::post_process(const std::string& filename, st
                         break;
                     }
                     case InsertLineType::ExtruderChangePredict: break;
+                    case InsertLineType::ToolchangerPreheat:
                     case InsertLineType::FilamentChangePredict:
                     {
                         gcode_line += str;
@@ -1972,6 +2017,9 @@ void GCodeProcessor::apply_config(const PrintConfig& config)
     m_filament_pre_cooling_temp = config.filament_pre_cooling_temperature.values;
     m_filament_preheat_temperature_delta = config.filament_preheat_temperature_delta.values;
     m_enable_pre_heating = config.enable_pre_heating;
+    m_toolchanger_preheat_time = (config.ooze_prevention.value && !config.single_extruder_multi_material.value &&
+                                  config.gcode_macro_language.value == "orca" && config.standby_temperature_delta.value != 0) ?
+                                     float(config.preheat_time.value) : 0.f;
     m_has_filament_switcher = config.has_filament_switcher;
     m_physical_extruder_map = config.physical_extruder_map.values;
     m_extruder_max_nozzle_count = config.extruder_max_nozzle_count.values;
@@ -2552,6 +2600,7 @@ void GCodeProcessor::reset()
     m_filament_nozzle_temp.clear();
     m_nozzle_diameter.clear();
     m_enable_pre_heating = false;
+    m_toolchanger_preheat_time = 0.f;
     m_has_filament_switcher = false;
     m_hotend_cooling_rate = m_hotend_heating_rate = { 2.f };
 
@@ -2780,6 +2829,7 @@ void GCodeProcessor::finalize(bool post_process)
             m_result.extruder_types,
             m_nozzle_diameter
         );
+        context.toolchanger_preheat_time = m_toolchanger_preheat_time;
         m_time_processor.post_process(m_result.filename, m_result.moves, m_result.lines_ends, context);
     }
 

@@ -2,6 +2,7 @@
 #define slic3r_MixedFilamentDialog_hpp_
 
 #include <array>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -140,6 +141,10 @@ private:
 
     // UI controls
     wxPanel*                    m_preview_canvas{nullptr};
+    // Full Spectrum's spectral (K-M/K-S) color estimate for ratio mixes, shown under the preview.
+    wxPanel*                    m_spectral_swatch{nullptr};
+    wxStaticText*               m_spectral_label{nullptr};
+    std::optional<std::string>  spectral_estimate() const;
     wxPanel*                    m_summary_panel{nullptr};
     std::vector<ComboBox*>      m_combo_filaments;
     wxBoxSizer*                 m_material_rows_sizer{nullptr};

@@ -17,6 +17,7 @@
 
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/FilamentMixer.hpp"
+#include "libslic3r/FullSpectrum/FullSpectrumKSPairResidual.hpp"
 #include "libslic3r/FullSpectrum/GradientBridge.hpp"
 #include "I18N.hpp"
 #include "GUI.hpp"
@@ -770,7 +771,45 @@ wxBoxSizer* MixedFilamentDialog::create_preview_panel()
     label->SetFont(::Label::Body_13);
     sizer->Add(label, 0, wxALIGN_CENTER | wxTOP, FromDIP(4));
 
+    // Second opinion from Full Spectrum's spectral predictor (measured filament database plus
+    // K-M/K-S mixing). Only an estimate of the printed sidewall; not verified by printing.
+    auto* spectral_row = new wxBoxSizer(wxHORIZONTAL);
+    m_spectral_swatch = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(FromDIP(16), FromDIP(16)));
+    m_spectral_swatch->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    m_spectral_swatch->Bind(wxEVT_PAINT, [this](wxPaintEvent&) {
+        wxBufferedPaintDC dc(m_spectral_swatch);
+        const wxSize sz = m_spectral_swatch->GetClientSize();
+        dc.SetBrush(wxBrush(StateColor::darkModeColorFor(*wxWHITE)));
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.DrawRectangle(0, 0, sz.GetWidth(), sz.GetHeight());
+        if (const auto hex = spectral_estimate()) {
+            dc.SetBrush(wxBrush(wxColour(wxString::FromUTF8(*hex))));
+            dc.SetPen(wxPen(wxColour("#909090")));
+            dc.DrawRoundedRectangle(0, 0, sz.GetWidth(), sz.GetHeight(), FromDIP(3));
+        }
+    });
+    m_spectral_label = new wxStaticText(this, wxID_ANY, _L("Spectral estimate"));
+    m_spectral_label->SetForegroundColour(wxColour("#909090"));
+    m_spectral_label->SetFont(::Label::Body_12);
+    m_spectral_label->SetToolTip(_L("Full Spectrum's prediction of the printed color, from its measured filament database "
+                                    "and Kubelka-Munk mixing. Physical results depend on the filaments and need a test print."));
+    spectral_row->Add(m_spectral_swatch, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(4));
+    spectral_row->Add(m_spectral_label, 0, wxALIGN_CENTER_VERTICAL);
+    sizer->Add(spectral_row, 0, wxALIGN_CENTER | wxTOP, FromDIP(4));
+
     return sizer;
+}
+
+std::optional<std::string> MixedFilamentDialog::spectral_estimate() const
+{
+    // Ratio mixes only: gradients and cycle patterns change along the height.
+    const size_t n = num_components();
+    if (n < 2 || m_result.gradient_enabled || !m_result.cycle_pattern.empty())
+        return std::nullopt;
+    std::vector<std::pair<std::string, int>> color_percents;
+    for (size_t i = 0; i < n; ++i)
+        color_percents.emplace_back(comp_colour(i).GetAsString(wxC2S_HTML_SYNTAX).ToStdString(), ratio(i));
+    return Slic3r::full_spectrum_ks_blend_color_multi(color_percents);
 }
 
 wxBoxSizer* MixedFilamentDialog::create_material_selection()
@@ -1341,7 +1380,44 @@ void MixedFilamentDialog::update_change_estimate()
             change_s += printer_cfg.opt_float(key);
     if (change_s > 0. && per_layer > 0.)
         text += wxString::Format(_L(" (about %d min per 100 layers for load and unload)"), int(std::lround(per_layer * 100. * change_s / 60.)));
+
+    // Purge cost on single-nozzle printers fed by an AMS: every change flushes the nozzle. Average
+    // the project's flush volumes between the recipe's components (extruder 1, with its multiplier).
+    const auto  *nozzle_opt = dynamic_cast<const ConfigOptionVectorBase *>(printer_cfg.option("nozzle_diameter"));
+    const size_t nozzles    = nozzle_opt ? std::max<size_t>(1, nozzle_opt->size()) : 1;
+    double flush_mm3 = 0.;
+    if (nozzles == 1 && per_layer > 0.) {
+        const auto &project_cfg = wxGetApp().preset_bundle->project_config;
+        if (const auto *matrix_opt = project_cfg.option<ConfigOptionFloats>("flush_volumes_matrix")) {
+            const std::vector<double> matrix = Slic3r::get_flush_volumes_matrix(matrix_opt->values, 0, nozzles);
+            const size_t n = size_t(std::lround(std::sqrt(double(matrix.size()))));
+            double multiplier = 1.;
+            if (const auto *mult = project_cfg.option<ConfigOptionFloats>("flush_multiplier"); mult && !mult->values.empty())
+                multiplier = mult->values.front();
+            double sum = 0.;
+            int    pairs = 0;
+            for (unsigned int a : m_result.components)
+                for (unsigned int b : m_result.components)
+                    if (a != b && a >= 1 && b >= 1 && a <= n && b <= n) {
+                        sum += matrix[(a - 1) * n + (b - 1)];
+                        ++pairs;
+                    }
+            if (pairs > 0)
+                flush_mm3 = sum / pairs * multiplier;
+        }
+    }
+    if (flush_mm3 > 0.) {
+        // 1.24 g/cm3 (PLA) turns the purged volume into a rough weight.
+        const double grams_per_100_layers = per_layer * 100. * flush_mm3 * 1.24 / 1000.;
+        text += "\n" + wxString::Format(_L("Purge: about %d g of filament per 100 layers"), int(std::lround(grams_per_100_layers)));
+    }
+    // Warn when mixing makes the print much slower or more wasteful than a single color.
+    const bool costly = per_layer >= 2. || (flush_mm3 > 0. && per_layer * flush_mm3 >= 300.);
+    m_change_estimate->SetForegroundColour(costly ? wxColour("#E8A000") : wxColour("#909090"));
+    if (costly)
+        text += "\n" + _L("Many filament changes: consider fewer components, a cycle pattern or sub-layers off.");
     m_change_estimate->SetLabel(text);
+    m_change_estimate->Wrap(FromDIP(380));
 }
 
 void MixedFilamentDialog::validate_cycle_pattern()
@@ -1891,6 +1967,12 @@ void MixedFilamentDialog::on_recommendation_clicked_triple(unsigned int a, unsig
 void MixedFilamentDialog::update_preview()
 {
     if (m_preview_canvas)  m_preview_canvas->Refresh();
+    if (m_spectral_swatch) {
+        const bool has_estimate = spectral_estimate().has_value();
+        m_spectral_swatch->Show(has_estimate);
+        m_spectral_label->Show(has_estimate);
+        m_spectral_swatch->Refresh();
+    }
     if (m_summary_panel)   m_summary_panel->Refresh();
     if (m_ratio_bar)       m_ratio_bar->Refresh();
     if (m_triangle_panel)  m_triangle_panel->Refresh();

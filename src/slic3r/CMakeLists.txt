@@ -680,6 +680,14 @@ set(SLIC3R_GUI_SOURCES
     Utils/MKS.cpp
     Utils/Moonraker.hpp
     Utils/Moonraker.cpp
+    Utils/SnapmakerConnect.hpp
+    Utils/SnapmakerConnect.cpp
+    Utils/SnapmakerGateway/ConnectionProcessManager.hpp
+    Utils/SnapmakerGateway/ConnectionProcessManager.cpp
+    Utils/SnapmakerGateway/GatewayAccount.hpp
+    Utils/SnapmakerGateway/GatewayAccount.cpp
+    GUI/SnapmakerConnectDialog.hpp
+    GUI/SnapmakerConnectDialog.cpp
     Utils/CpuMemory.cpp
     Utils/CpuMemory.hpp
     Utils/Duet.cpp

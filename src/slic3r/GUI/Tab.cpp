@@ -3226,6 +3226,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("initial_layer_print_height", "layer-height");
         optgroup->append_single_option_line("enable_mixed_color_sublayer");
         optgroup->append_single_option_line("mixed_color_sublayer_min_height");
+        optgroup->append_single_option_line("mixed_color_sublayer_infill");
 
         optgroup = page->new_optgroup(L("Line width"), L"param_line_width");
         optgroup->append_single_option_line("line_width","parameter/line-width");

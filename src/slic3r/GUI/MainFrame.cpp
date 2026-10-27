@@ -29,6 +29,7 @@
 #include "3DScene.hpp"
 #include "ParamsDialog.hpp"
 #include "UserPresetsDialog.hpp"
+#include "SnapmakerConnectDialog.hpp"
 #include "PrintHostDialogs.hpp"
 #include "wxExtensions.hpp"
 #include "GUI_ObjectList.hpp"
@@ -3142,6 +3143,15 @@ void MainFrame::init_menubar_as_editor()
             fileMenu, wxID_ANY, _L("Batch Preset Management"), wxString::Format(_L("Batch Preset Management")),
             [this](wxCommandEvent &) {
                 UserPresetsDialog dlg(this);
+                dlg.ShowModal();
+            },
+            "", nullptr);
+
+        append_menu_item(
+            fileMenu, wxID_ANY, _L("Snapmaker Account and Devices") + dots,
+            _L("Sign in to Snapmaker and manage Snapmaker cloud printers through Snapmaker's connection helper"),
+            [this](wxCommandEvent &) {
+                SnapmakerConnectDialog dlg(this);
                 dlg.ShowModal();
             },
             "", nullptr);

@@ -5554,6 +5554,17 @@ void PrintConfigDef::init_fff_params()
     def->mode = comSimple;
     def->set_default_value(new ConfigOptionBool(false));
 
+    def = this->add("preheat_time", coFloat);
+    def->label = L("Preheat time");
+    def->tooltip = L("With ooze prevention on a toolchanger, idle tools drop to their standby temperature. "
+                     "This many seconds before a tool is used again, it is heated back to printing temperature "
+                     "so the tool change does not wait for it.");
+    def->sidetext = "s";
+    def->min = 0;
+    def->max = 120;
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionFloat(30.0));
+
     def = this->add("standby_temperature_delta", coInt);
     def->label = L("Temperature variation");
     //def->tooltip = L("Temperature difference to be applied when an extruder is not active. "
@@ -6287,6 +6298,16 @@ void PrintConfigDef::init_fff_params()
     def->max = 0.2;
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(0.));
+
+    // Full Spectrum "Apply subdivision to infill" (dithering_local_z_infill).
+    def = this->add("mixed_color_sublayer_infill", coBool);
+    def->label = L("Subdivide infill");
+    def->tooltip = L("Also split the infill of mixed color areas into sub-layers. Turn it off to print that infill "
+                     "once per layer at the normal layer height, with the sub-layer that finishes the layer; "
+                     "walls and surfaces are still split.");
+    def->category = L("Quality");
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionBool(true));
 
     def = this->add("enable_prime_tower", coBool);
     def->label = L("Enable");

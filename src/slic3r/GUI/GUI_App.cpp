@@ -93,6 +93,7 @@
 #include "../Utils/PresetUpdater.hpp"
 #include "../Utils/VersionPolicyManager.hpp"
 #include "../Utils/PrintHost.hpp"
+#include "../Utils/SnapmakerConnect.hpp"
 #include "../Utils/Process.hpp"
 #include "../Utils/MacDarkMode.hpp"
 #include "../Utils/Http.hpp"
@@ -2926,6 +2927,8 @@ int GUI_App::OnExit()
 #endif
 
     Slic3r::HelioQuery::shutdown_background_requests();
+    // Stop Snapmaker's connection helper if the Snapmaker account dialog started it.
+    SnapmakerConnect::instance().stop();
 
     stop_sync_user_preset();
 

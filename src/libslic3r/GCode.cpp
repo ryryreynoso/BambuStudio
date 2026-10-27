@@ -2091,6 +2091,14 @@ namespace DoExport {
     static void init_ooze_prevention(const Print &print, OozePrevention &ooze_prevention)
 	{
 	    // Calculate wiping points if needed
+	    if (print.config().ooze_prevention.value && ! print.config().single_extruder_multi_material &&
+	        print.config().gcode_macro_language.value == "orca") {
+	        // Toolchangers using the OrcaSlicer macro language (Snapmaker U1) park and wipe tools in
+	        // their own tool-change macros: only change temperatures, as OrcaSlicer does, without the
+	        // skirt standby points. GCodeProcessor preheats the next tool (preheat_time).
+	        ooze_prevention.enable = true;
+	        return;
+	    }
 	    if (print.config().ooze_prevention.value && ! print.config().single_extruder_multi_material) {
 	        Points skirt_points;
 	        for (const ExtrusionEntity *ee : print.skirt().entities)
@@ -5840,6 +5848,9 @@ GCode::LayerResult GCode::process_layer(
 
                 // --- Unified emission loop ---
                 const bool is_infill_first = print.config().is_infill_first;
+                // Full Spectrum "Apply subdivision to infill" off: infill is printed once, at the full
+                // layer height and flow, by the pass that ends at the layer's print_z.
+                const bool subdivide_infill = print.config().mixed_color_sublayer_infill.value;
                 auto has_infill = [](const std::vector<ObjectByExtruder::Island::Region> &by_region) {
                     for (const auto &r : by_region)
                         if (!r.infills.empty())
@@ -5858,6 +5869,22 @@ GCode::LayerResult GCode::process_layer(
                     // coincides with the first extrusion point, ensuring Z
                     // reaches sub_z via the combined XY+Z move.
                     m_need_change_layer_lift_z = true;
+                    const bool top_pass = entry.sub_z >= print_z - EPSILON;
+                    const bool print_infill = subdivide_infill || top_pass;
+                    // Infill of the top pass at the full layer: normal flow and height at print_z.
+                    auto extrude_infill_pass = [&](const std::vector<ObjectByExtruder::Island::Region> &by_region, bool ironing) {
+                        if (!print_infill)
+                            return std::string();
+                        if (subdivide_infill)
+                            return this->extrude_infill(print, by_region, ironing);
+                        const double saved_ratio = m_sub_layer_flow_ratio, saved_height = m_sub_layer_height;
+                        m_sub_layer_flow_ratio = 0.;
+                        m_sub_layer_height     = 0.;
+                        std::string out = this->extrude_infill(print, by_region, ironing);
+                        m_sub_layer_flow_ratio = saved_ratio;
+                        m_sub_layer_height     = saved_height;
+                        return out;
+                    };
 
                     for (ObjectByExtruder::Island &island : instance_to_print.object_by_extruder.islands) {
                         const auto &src = island.by_region;
@@ -5873,25 +5900,25 @@ GCode::LayerResult GCode::process_layer(
                         if (is_infill_first && !first_layer) {
                             if (!has_wipe_tower && need_insert_timelapse_gcode_for_traditional
                                 && printer_structure == PrinterStructure::psI3
-                                && !has_insert_timelapse_gcode && has_infill(by_region_specific)) {
+                                && !has_insert_timelapse_gcode && print_infill && has_infill(by_region_specific)) {
                                 gcode += this->retract(false, false, auto_lift_type, true);
                                 gcode += insert_timelapse_gcode();
                                 has_insert_timelapse_gcode = true;
                             }
-                            gcode += this->extrude_infill(print, by_region_specific, false);
+                            gcode += extrude_infill_pass(by_region_specific, false);
                             gcode += this->extrude_perimeters(print, by_region_specific);
                         } else {
                             gcode += this->extrude_perimeters(print, by_region_specific);
                             if (!has_wipe_tower && need_insert_timelapse_gcode_for_traditional
                                 && printer_structure == PrinterStructure::psI3
-                                && !has_insert_timelapse_gcode && has_infill(by_region_specific)) {
+                                && !has_insert_timelapse_gcode && print_infill && has_infill(by_region_specific)) {
                                 gcode += this->retract(false, false, auto_lift_type, true);
                                 gcode += insert_timelapse_gcode();
                                 has_insert_timelapse_gcode = true;
                             }
-                            gcode += this->extrude_infill(print, by_region_specific, false);
+                            gcode += extrude_infill_pass(by_region_specific, false);
                         }
-                        gcode += this->extrude_infill(print, by_region_specific, true);
+                        gcode += extrude_infill_pass(by_region_specific, true);
                     }
                 }
 

@@ -60,22 +60,22 @@ system stays mergeable with future Bambu releases and keeps MakerWorld projects 
 | 1 | Virtual mixed filaments | Yes (slots) | `MixedFilamentManager` | Native |
 | 2 | Ratio mode | Yes, N components | `WeightedBlend` | Native |
 | 3 | **Cycle mode** | No | `Pattern.cpp`, `Resolver.cpp` | **Done** (`filament_mixed_pattern`, dialog row with sequence strip), single group |
-| 4 | Match mode (HEX) | Yes (`ColorDecompose`) | `MixedColorMatchHelpers` + KM/KS model | Native; Full Spectrum KM/KS predictor vendored, not yet wired to the UI |
+| 4 | Match mode (HEX) | Yes (`ColorDecompose`) | `MixedColorMatchHelpers` + KM/KS model | Native matching; **Full Spectrum's spectral (KM/KS) estimate shown** under the dialog preview for ratio mixes |
 | 5 | Gradient mode | 2 components, custom curve | N components, stops | **Done**: 3-filament gradients via Full Spectrum's sampler (engine, dialog, import) |
-| 6 | Ratio recommendations | Yes (`recommend_from_physical_filaments`) | auto pairwise generation | Auto-pairs pending |
+| 6 | Ratio recommendations | Yes (`recommend_from_physical_filaments`) | auto pairwise generation | **Done**: right-click "Add 50/50 mixes of all filament pairs" |
 | 7 | Mixed-color previews | Yes | `Display.cpp` | Native |
 | 8 | Layer alternation | Yes (deficit round-robin) | `Resolver.cpp` | Native |
 | 9 | Painting / object assignment | Yes | gizmo | Native |
 | 10 | Subdivide mix layer | Yes (`enable_mixed_color_sublayer`) | Local-Z | Native |
-| 11 | Full-domain subdivision | Applies to all slot geometry | `dithering_local_z_whole_objects` | Pending review |
-| 12 | Infill subdivision | Always | `dithering_local_z_infill` | Toggle pending |
+| 11 | Full-domain subdivision | Applies to all slot geometry | `dithering_local_z_whole_objects` | Native: Bambu always subdivides the whole slot geometry (Full Spectrum's override on); layer 0 is never split (Full Spectrum's "Keep first layer unsplit") |
+| 12 | Infill subdivision | Always | `dithering_local_z_infill` | **Done**: `mixed_color_sublayer_infill` (default on = Bambu's behavior); off prints infill once per layer at full height |
 | 13 | Gradient slicing + preview | Yes (2 comps) | `Gradient*.cpp` | 2 native; 3+ done (dialog preview uses the slicing sampler) |
 | 14 | Minimum mix height | No | `mixed_filament_height_lower_bound` | **Engine done** (`mixed_color_sublayer_min_height`, Quality tab) |
 | 15 | Save / reopen | Yes (project config) | FS 3MF JSON | Native; new keys persist via project config; **Full Spectrum projects import** (compact rows) |
-| 16 | Compatibility warnings | Type consistency, integrity | | AMS cost warnings pending |
-| 17 | Usage / toolchange estimates | GCodeProcessor | | AMS cost estimate pending |
-| – | Per-perimeter cycle groups | No | `resolve_perimeter` | Pending (needs per-wall tools in GCode.cpp) |
-| – | Surface bias | No | `PerimeterModulation` | Pending |
+| 16 | Compatibility warnings | Type consistency, integrity | | **Done**: dialog warns when a recipe needs ≥2 changes per layer or heavy purge |
+| 17 | Usage / toolchange estimates | GCodeProcessor | | **Done**: changes per layer, load/unload time and purge weight per 100 layers in the dialog |
+| – | Per-perimeter cycle groups | No | `resolve_perimeter` | **Not ported**: Full Spectrum assigns filaments per wall during wall generation; Bambu has no per-wall tool assignment. Imported projects approximate it and say so |
+| – | Surface bias | No | `PerimeterModulation` | **Not ported**: part of Full Spectrum's image-map renderer (`ImageMap/`), a separate subsystem. Imported projects approximate it and say so |
 
 ## 5. Full Spectrum file inventory (reference)
 
@@ -182,9 +182,12 @@ color catalogue (`FilamentColorLibrary`), Snapmaker device code, U1 profiles.
 On the U1 a filament change is a cheap tool swap. On Bambu printers it is an AMS swap: cut,
 retract, load, purge into the prime tower (flush volumes matrix). Bambu's native mixed feature
 already emits these through the normal filament-change path, so no new motion or heater commands
-are introduced by this port. Pending work: per-slot estimates of added changes, flush volume
-(`flush_volumes_matrix`) and time (`machine_load_filament_time` + `machine_unload_filament_time`),
-with warnings above thresholds and blocking where a printer cannot satisfy a recipe.
+are introduced by this port. The mixed-filament dialog estimates the cost of a recipe:
+filament changes per layer, load and unload time (`machine_load_filament_time` +
+`machine_unload_filament_time`), and, on single-nozzle printers, the purge weight from the project's
+flush volumes (`flush_volumes_matrix` × `flush_multiplier`, PLA density). It turns orange and
+suggests alternatives at 2 or more changes per layer or 300 mm³ of purge per layer. Nothing is
+blocked: Bambu's existing checks still decide what a printer can print.
 
 ## 9. Validation plan
 

@@ -1574,6 +1574,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionBool,               spiral_mode_smooth))
     ((ConfigOptionFloatOrPercent,     spiral_mode_max_xy_smoothing))
     ((ConfigOptionInt,                standby_temperature_delta))
+    ((ConfigOptionFloat,              preheat_time))
     ((ConfigOptionIntsNullable,       nozzle_temperature))
     ((ConfigOptionInts,               chamber_temperatures))
     ((ConfigOptionBoolsNullable,      wipe))
@@ -1583,6 +1584,7 @@ PRINT_CONFIG_CLASS_DERIVED_DEFINE(
     ((ConfigOptionFloatsNullable,     wipe_distance))
     ((ConfigOptionBool,               enable_mixed_color_sublayer))
     ((ConfigOptionFloat,              mixed_color_sublayer_min_height))
+    ((ConfigOptionBool,               mixed_color_sublayer_infill))
     ((ConfigOptionBool,               enable_prime_tower))
     ((ConfigOptionBool,               prime_tower_enable_framework))
     // BBS: change wipe_tower_x and wipe_tower_y data type to floats to add partplate logic
