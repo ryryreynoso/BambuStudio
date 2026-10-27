@@ -32,5 +32,6 @@
         "Snapmaker"
     ],
     "is_custom_defined": "0",
-    "version": "2.1.1.0"
+    "version": "2.1.1.0",
+    "filament_id": "U1_SNAPMAKER_SUPPORT_FOR_PLA"
 }

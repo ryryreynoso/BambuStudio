@@ -3,5 +3,6 @@
     "from": "system",
     "instantiation": "false",
     "name": "Generic PLA-CF @U1 base",
-    "inherits": "fdm_filament_pla_cf_category"
+    "inherits": "fdm_filament_pla_cf_category",
+    "filament_id": "U1_GENERIC_PLA_CF"
 }

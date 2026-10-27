@@ -53,6 +53,73 @@ def is_u1(data):
     return any("Snapmaker U1" in p for p in data.get("compatible_printers", []))
 
 
+def add_missing_filament_ids(out_dir, filament_list):
+    """Give every instantiated filament a filament_id, which Bambu Studio requires.
+
+    Snapmaker Orca leaves many U1 filaments without one; Bambu Studio then refuses to load them
+    ("Can not find filament_id"). The id goes on the filament's own base profile (the highest
+    ancestor that is not a shared fdm_* base), so its nozzle variants share it, as Bambu's do.
+    """
+    paths = {item["name"]: os.path.join(out_dir, item["sub_path"]) for item in filament_list}
+    data = {name: load(path) for name, path in paths.items()}
+
+    def chain(name):
+        names = []
+        while name in data:
+            names.append(name)
+            name = data[name].get("inherits")
+        return names
+
+    owners = set()
+    for name, profile in data.items():
+        ancestors = chain(name)
+        if profile.get("instantiation") != "true" or any(data[a].get("filament_id") for a in ancestors):
+            continue
+        owners.add([a for a in ancestors if not a.startswith("fdm_")][-1])
+
+    taken = {p["filament_id"] for p in data.values() if p.get("filament_id")}
+    for owner in sorted(owners):
+        base = owner.replace("@U1 base", "").strip()
+        filament_id = "U1_" + "".join(c if c.isalnum() else "_" for c in base.upper()).strip("_")
+        assert filament_id not in taken, filament_id
+        taken.add(filament_id)
+        data[owner]["filament_id"] = filament_id
+        with open(paths[owner], "w", encoding="utf-8") as f:
+            json.dump(data[owner], f, indent=4)
+            f.write("\n")
+    return len(owners)
+
+
+def rename_bambu_name_clashes(out_dir, filament_list, bambu_names):
+    """Rename U1 filaments that share a name with a Bambu Lab filament, e.g. "Generic PLA".
+
+    Bambu Studio refuses to load a second preset with a name already loaded ("duplicated
+    defines"). Snapmaker names its 0.4 mm variants plainly and the others "<name> @U1 <d> nozzle";
+    the clashing ones become "<name> @U1 0.4 nozzle" to match.
+    """
+    renamed = 0
+    for item in filament_list:
+        if item["name"] not in bambu_names:
+            continue
+        path = os.path.join(out_dir, item["sub_path"])
+        data = load(path)
+        if data.get("instantiation") != "true":
+            continue  # base profiles are never compared with another bundle's presets
+        printers = data.get("compatible_printers", [])
+        assert len(printers) == 1 and printers[0].startswith("Snapmaker U1 ("), (item["name"], printers)
+        nozzle = printers[0][len("Snapmaker U1 ("):-1]  # "0.4 nozzle"
+        new_name = "%s @U1 %s" % (item["name"], nozzle)
+        new_sub_path = os.path.join(os.path.dirname(item["sub_path"]), new_name + ".json")
+        data["name"] = new_name
+        os.remove(path)
+        with open(os.path.join(out_dir, new_sub_path), "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+            f.write("\n")
+        item["name"], item["sub_path"] = new_name, new_sub_path
+        renamed += 1
+    return renamed
+
+
 def main():
     src_repo, dst_repo = sys.argv[1:3]
     src = os.path.join(src_repo, "resources", "profiles")
@@ -104,6 +171,9 @@ def main():
                 else:
                     copy_without_bom(os.path.join(src, "Snapmaker", item["sub_path"]), dst_path)
                 index[kind + "_list"].append(item)
+    bambu = load(os.path.join(dst, "BBL.json"))
+    rename_bambu_name_clashes(out_dir, index["filament_list"], {f["name"] for f in bambu["filament_list"]})
+    add_missing_filament_ids(out_dir, index["filament_list"])
 
     # Bed model, bed texture and cover images referenced by the U1 model and machines.
     assets = {"Snapmaker U1_cover.png"}

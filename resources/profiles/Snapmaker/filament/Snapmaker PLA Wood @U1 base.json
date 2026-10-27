@@ -274,5 +274,6 @@
     "textured_plate_temp_initial_layer": [
         "65"
     ],
-    "version": "0.0.0.0"
+    "version": "0.0.0.0",
+    "filament_id": "U1_SNAPMAKER_PLA_WOOD"
 }

@@ -2,29 +2,20 @@
     "type": "filament",
     "from": "system",
     "instantiation": "true",
-    "name": "Generic PETG",
-    "setting_id": "GFSG00_01",
-    "inherits": "Generic PETG @U1 base",
+    "name": "Generic ABS @U1 0.4 nozzle",
+    "setting_id": "GFSB99",
+    "inherits": "Generic ABS @U1 base",
     "filament_max_volumetric_speed": [
-        "12"
-    ],
-    "filament_long_retractions_when_cut": [
-        "1"
-    ],
-    "filament_retraction_distances_when_cut": [
-        "18"
+        "15"
     ],
     "compatible_printers": [
         "Snapmaker U1 (0.4 nozzle)"
     ],
-    "filament_end_gcode": [
-        ""
-    ],
-    "filament_start_gcode": [
-        ""
-    ],
     "enable_pressure_advance": [
         "0"
+    ],
+    "filament_end_gcode": [
+        ""
     ],
     "filament_multitool_ramming": [
         "1"
@@ -35,53 +26,42 @@
     "filament_multitool_ramming_volume": [
         "0.5"
     ],
-    "filament_minimal_purge_on_wipe_tower": [
-        "15"
+    "filament_retract_length_toolchange": [
+        "10"
     ],
-    "hot_plate_temp": [
-        "80"
-    ],
-    "hot_plate_temp_initial_layer": [
-        "80"
-    ],
-    "pressure_advance": [
-        "0.04"
+    "filament_start_gcode": [
+        ""
     ],
     "filament_vendor": [
         "Generic"
     ],
-    "filament_retract_length_toolchange": [
-        "10"
+    "nozzle_temperature_initial_layer": [
+        "270"
     ],
-    "textured_plate_temp": [
-        "80"
+    "filament_is_high_temperature": [
+        "1"
     ],
-    "textured_plate_temp_initial_layer": [
-        "80"
-    ],
-    "eng_plate_temp": [
-        "80"
-    ],
-    "eng_plate_temp_initial_layer": [
-        "80"
-    ],
-    "fan_max_speed": [
-        "90"
-    ],
-    "fan_min_speed": [
-        "40"
-    ],
-    "slow_down_min_speed": [
-        "20"
-    ],
-    "close_fan_the_first_x_layers": [
-        "3"
-    ],
+    "compatible_prints": [],
     "complete_print_exhaust_fan_speed": [
         "70"
     ],
     "during_print_exhaust_fan_speed": [
         "70"
+    ],
+    "eng_plate_temp": [
+        "90"
+    ],
+    "eng_plate_temp_initial_layer": [
+        "90"
+    ],
+    "fan_cooling_layer_time": [
+        "30"
+    ],
+    "fan_max_speed": [
+        "80"
+    ],
+    "fan_min_speed": [
+        "10"
     ],
     "filament_cooling_final_speed": [
         "3.4"
@@ -93,10 +73,10 @@
         "4"
     ],
     "filament_cost": [
-        "24.99"
+        "20"
     ],
-    "filament_density": [
-        "1.25"
+    "filament_deretraction_speed": [
+        "nil"
     ],
     "filament_flow_ratio": [
         "0.95"
@@ -110,10 +90,16 @@
     "filament_loading_speed_start": [
         "3"
     ],
-    "filament_retraction_length": [
+    "filament_minimal_purge_on_wipe_tower": [
+        "15"
+    ],
+    "filament_notes": [
+        ""
+    ],
+    "filament_retract_when_changing_layer": [
         "nil"
     ],
-    "filament_retraction_minimum_travel": [
+    "filament_retraction_length": [
         "nil"
     ],
     "filament_retraction_speed": [
@@ -128,38 +114,44 @@
     "filament_unloading_speed_start": [
         "100"
     ],
-    "filament_z_hop_types": [
+    "filament_wipe": [
         "nil"
     ],
-    "nozzle_temperature": [
-        "255"
+    "filament_z_hop": [
+        "nil"
     ],
-    "nozzle_temperature_initial_layer": [
-        "255"
-    ],
-    "nozzle_temperature_range_low": [
-        "230"
-    ],
-    "overhang_fan_speed": [
+    "hot_plate_temp": [
         "90"
     ],
-    "overhang_fan_threshold": [
-        "10%"
+    "hot_plate_temp_initial_layer": [
+        "90"
+    ],
+    "nozzle_temperature": [
+        "270"
+    ],
+    "overhang_fan_speed": [
+        "80"
     ],
     "pellet_flow_coefficient": [
         "0.4157"
     ],
+    "pressure_advance": [
+        "0.02"
+    ],
+    "slow_down_for_layer_cooling": [
+        "1"
+    ],
     "slow_down_layer_time": [
-        "12"
+        "3"
     ],
-    "supertack_plate_temp": [
-        "35"
+    "slow_down_min_speed": [
+        "20"
     ],
-    "supertack_plate_temp_initial_layer": [
-        "35"
+    "textured_plate_temp": [
+        "90"
     ],
-    "temperature_vitrification": [
-        "70"
+    "textured_plate_temp_initial_layer": [
+        "90"
     ],
     "chamber_temperatures": [
         "0"
@@ -188,8 +180,10 @@
     "chamber_temperature": [
         "0"
     ],
+    "close_fan_the_first_x_layers": [
+        "3"
+    ],
     "compatible_printers_condition": "",
-    "compatible_prints": [],
     "compatible_prints_condition": "",
     "cool_plate_temp": [
         "0"
@@ -206,23 +200,17 @@
     "enable_overhang_bridge_fan": [
         "1"
     ],
-    "fan_cooling_layer_time": [
-        "30"
-    ],
-    "filament_deretraction_speed": [
-        "nil"
+    "filament_density": [
+        "1.04"
     ],
     "filament_diameter": [
         "1.75"
     ],
-    "filament_is_high_temperature": [
-        "0"
-    ],
     "filament_is_support": [
         "0"
     ],
-    "filament_notes": [
-        ""
+    "filament_long_retractions_when_cut": [
+        "nil"
     ],
     "filament_ramming_parameters": [
         "120 100 6.6 6.8 7.2 7.6 7.9 8.2 8.7 9.4 9.9 10.0| 0.05 6.6 0.45 6.8 0.95 7.8 1.45 8.3 1.95 9.7 2.45 10 2.95 7.6 3.45 7.6 3.95 7.6 4.45 7.6 4.95 7.6"
@@ -245,7 +233,10 @@
     "filament_retract_restart_extra_toolchange": [
         "nil"
     ],
-    "filament_retract_when_changing_layer": [
+    "filament_retraction_distances_when_cut": [
+        "nil"
+    ],
+    "filament_retraction_minimum_travel": [
         "nil"
     ],
     "filament_shrink": [
@@ -270,15 +261,12 @@
         "4"
     ],
     "filament_type": [
-        "PETG"
-    ],
-    "filament_wipe": [
-        "nil"
+        "ABS"
     ],
     "filament_wipe_distance": [
         "nil"
     ],
-    "filament_z_hop": [
+    "filament_z_hop_types": [
         "nil"
     ],
     "full_fan_speed_layer": [
@@ -300,7 +288,13 @@
         "-1"
     ],
     "nozzle_temperature_range_high": [
-        "270"
+        "280"
+    ],
+    "nozzle_temperature_range_low": [
+        "240"
+    ],
+    "overhang_fan_threshold": [
+        "25%"
     ],
     "reduce_fan_stop_start_freq": [
         "1"
@@ -308,11 +302,17 @@
     "required_nozzle_HRC": [
         "3"
     ],
-    "slow_down_for_layer_cooling": [
-        "1"
+    "supertack_plate_temp": [
+        "35"
+    ],
+    "supertack_plate_temp_initial_layer": [
+        "35"
     ],
     "support_material_interface_fan_speed": [
         "-1"
+    ],
+    "temperature_vitrification": [
+        "100"
     ],
     "textured_cool_plate_temp": [
         "40"

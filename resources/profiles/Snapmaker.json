@@ -235,8 +235,8 @@
             "sub_path": "filament/Generic PA @U1 base.json"
         },
         {
-            "name": "Generic PA",
-            "sub_path": "filament/Generic PA.json"
+            "name": "Generic PA @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PA @U1 0.4 nozzle.json"
         },
         {
             "name": "fdm_filament_pa_cf_category",
@@ -247,8 +247,8 @@
             "sub_path": "filament/Generic PA-CF @U1 base.json"
         },
         {
-            "name": "Generic PA-CF",
-            "sub_path": "filament/Generic PA-CF.json"
+            "name": "Generic PA-CF @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PA-CF @U1 0.4 nozzle.json"
         },
         {
             "name": "fdm_filament_pc_category",
@@ -267,8 +267,8 @@
             "sub_path": "filament/Generic PVA @U1 base.json"
         },
         {
-            "name": "Generic PVA",
-            "sub_path": "filament/Generic PVA.json"
+            "name": "Generic PVA @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PVA @U1 0.4 nozzle.json"
         },
         {
             "name": "fdm_filament_petg_category",
@@ -447,8 +447,8 @@
             "sub_path": "filament/Generic PLA @U1 base.json"
         },
         {
-            "name": "Generic PLA",
-            "sub_path": "filament/Generic PLA.json"
+            "name": "Generic PLA @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PLA @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic PLA @U1 0.2 nozzle",
@@ -487,8 +487,8 @@
             "sub_path": "filament/Generic PLA Silk @U1 base.json"
         },
         {
-            "name": "Generic PLA Silk",
-            "sub_path": "filament/Generic PLA Silk.json"
+            "name": "Generic PLA Silk @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PLA Silk @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic PLA Silk @U1 0.2 nozzle",
@@ -507,8 +507,8 @@
             "sub_path": "filament/Generic PLA-CF @U1 base.json"
         },
         {
-            "name": "Generic PLA-CF",
-            "sub_path": "filament/Generic PLA-CF.json"
+            "name": "Generic PLA-CF @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PLA-CF @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic PLA-CF @U1 0.6 nozzle",
@@ -543,8 +543,8 @@
             "sub_path": "filament/Generic PETG @U1 base.json"
         },
         {
-            "name": "Generic PETG",
-            "sub_path": "filament/Generic PETG.json"
+            "name": "Generic PETG @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PETG @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic PETG @U1 0.2 nozzle",
@@ -615,8 +615,8 @@
             "sub_path": "filament/Generic TPU @U1 base.json"
         },
         {
-            "name": "Generic TPU",
-            "sub_path": "filament/Generic TPU.json"
+            "name": "Generic TPU @U1 0.4 nozzle",
+            "sub_path": "filament/Generic TPU @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic TPU @U1 0.6 nozzle",
@@ -719,8 +719,8 @@
             "sub_path": "filament/Generic PC @U1 base.json"
         },
         {
-            "name": "Generic PC",
-            "sub_path": "filament/Generic PC.json"
+            "name": "Generic PC @U1 0.4 nozzle",
+            "sub_path": "filament/Generic PC @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic PC @U1 0.6 nozzle",
@@ -743,8 +743,8 @@
             "sub_path": "filament/Generic ABS @U1 base.json"
         },
         {
-            "name": "Generic ABS",
-            "sub_path": "filament/Generic ABS.json"
+            "name": "Generic ABS @U1 0.4 nozzle",
+            "sub_path": "filament/Generic ABS @U1 0.4 nozzle.json"
         },
         {
             "name": "Generic ABS @U1 0.2 nozzle",

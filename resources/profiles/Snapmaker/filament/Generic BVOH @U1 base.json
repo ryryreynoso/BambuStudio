@@ -3,5 +3,6 @@
     "from": "system",
     "instantiation": "false",
     "name": "Generic BVOH @U1 base",
-    "inherits": "fdm_filament_support_bvoh_category"
+    "inherits": "fdm_filament_support_bvoh_category",
+    "filament_id": "U1_GENERIC_BVOH"
 }

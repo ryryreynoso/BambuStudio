@@ -2,7 +2,7 @@
     "type": "filament",
     "from": "system",
     "instantiation": "true",
-    "name": "Generic PLA-CF",
+    "name": "Generic PLA-CF @U1 0.4 nozzle",
     "setting_id": "GFSL9811",
     "inherits": "Generic PLA-CF @U1 base",
     "compatible_printers": [

@@ -3,5 +3,6 @@
     "from": "system",
     "instantiation": "false",
     "name": "Snapmaker PLA Full Spectrum @U1 base",
-    "inherits": "fdm_filament_pla_category"
+    "inherits": "fdm_filament_pla_category",
+    "filament_id": "U1_SNAPMAKER_PLA_FULL_SPECTRUM"
 }

@@ -3,5 +3,6 @@
     "from": "system",
     "instantiation": "false",
     "name": "Polymaker Silk PLA Family @U1 base",
-    "inherits": "fdm_filament_pla_silk_category"
+    "inherits": "fdm_filament_pla_silk_category",
+    "filament_id": "U1_POLYMAKER_SILK_PLA_FAMILY"
 }
