@@ -437,7 +437,11 @@ void MediaPlayCtrl::Play()
 
     NetworkAgent *agent = wxGetApp().getAgent();
     std::string  agent_version = agent ? agent->get_version() : "";
-    if (m_lan_proto > MachineObject::LVL_Disable && (m_lan_mode || !m_remote_proto) && !m_disable_lan && !m_lan_ip.empty()) {
+    // 3D Print: use the printer's own LAN stream whenever the app knows its address and access code,
+    // and go through the cloud only after LAN has just failed. Bambu's order (cloud first for a
+    // cloud-bound printer) gives "Connection Failed [1:40xx]" when the cloud stream is refused.
+    bool lan_ready = m_lan_proto > MachineObject::LVL_Disable && !m_lan_ip.empty() && !m_lan_passwd.empty();
+    if (m_lan_proto > MachineObject::LVL_Disable && (m_lan_mode || !m_remote_proto || lan_ready) && !m_disable_lan && !m_lan_ip.empty()) {
         m_disable_lan = m_remote_proto && !m_lan_mode; // try remote next time
         std::string url;
         if (m_lan_proto == MachineObject::LVL_Local)
@@ -736,7 +740,8 @@ void MediaPlayCtrl::ToggleStream()
             wxGetApp().app_config->set("not_show_vcamera_stop_prev", "1");
         if (res == wxID_CANCEL) return;
     }
-    if (m_lan_proto > MachineObject::LVL_Disable && (m_lan_mode || !m_remote_proto) && !m_disable_lan && !m_lan_ip.empty()) {
+    bool lan_ready = m_lan_proto > MachineObject::LVL_Disable && !m_lan_ip.empty() && !m_lan_passwd.empty();
+    if (m_lan_proto > MachineObject::LVL_Disable && (m_lan_mode || !m_remote_proto || lan_ready) && !m_disable_lan && !m_lan_ip.empty()) {
         std::string url;
         if (m_lan_proto == MachineObject::LVL_Local)
             url = "bambu:///local/" + m_lan_ip + ".?port=6000&user=" + m_lan_user + "&passwd=" + m_lan_passwd;
