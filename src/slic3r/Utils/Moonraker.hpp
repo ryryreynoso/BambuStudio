@@ -36,6 +36,13 @@ public:
     // reply body ({"result": {"status": {...}}}), or an empty string with msg set. Blocks; call it
     // off the UI thread.
     std::string query_objects(const std::vector<std::string> &objects, wxString &msg) const;
+    // Downloads a file Moonraker serves under server/files (for example "camera/monitor.jpg", the
+    // Snapmaker U1's camera picture). Blocks; call it off the UI thread.
+    bool get_file(const std::string &path, std::string &body, wxString &msg) const;
+    // Snapmaker's print start (server.files.start_local_print over Moonraker's websocket), as Snapmaker
+    // Orca sends it: the uploaded gcode path relative to the gcodes root and the options JSON
+    // (map_table, bed_level, flow_calibrate, time_lapse_camera). Blocks; call it off the UI thread.
+    bool start_local_print(const std::string &path, const std::string &options, wxString &msg) const;
 
 private:
     std::string m_host;

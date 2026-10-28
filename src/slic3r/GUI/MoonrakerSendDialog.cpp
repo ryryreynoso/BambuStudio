@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <thread>
 
+#include <wx/dcmemory.h>
 #include <wx/sizer.h>
 #include <wx/statbmp.h>
 #include <wx/textctrl.h>
@@ -14,6 +15,8 @@
 #include "PartPlate.hpp"
 #include "Plater.hpp"
 #include "Widgets/Button.hpp"
+#include "Widgets/CheckBox.hpp"
+#include "Widgets/ComboBox.hpp"
 #include "Widgets/Label.hpp"
 #include "Widgets/StateColor.hpp"
 #include "wxExtensions.hpp"
@@ -44,7 +47,38 @@ wxWindow *make_swatch(wxWindow *parent, const wxColour &colour, int size)
     return swatch;
 }
 
-wxString upper(const std::string &s) { return wxString::FromUTF8(s).Upper(); }
+// Square colour chip for the toolhead list.
+wxBitmap swatch_bitmap(const wxColour &colour, int size)
+{
+    wxBitmap   bitmap(size, size);
+    wxMemoryDC dc(bitmap);
+    dc.SetBackground(*wxWHITE_BRUSH);
+    dc.Clear();
+    dc.SetPen(wxPen(wxColour(172, 172, 172)));
+    dc.SetBrush(wxBrush(colour.IsOk() ? colour : wxColour(238, 238, 238)));
+    dc.DrawRectangle(0, 0, size, size);
+    dc.SelectObject(wxNullBitmap);
+    return bitmap;
+}
+
+int colour_distance(const wxColour &a, const wxColour &b)
+{
+    if (!a.IsOk() || !b.IsOk())
+        return 3 * 255 * 255;
+    const int dr = a.Red() - b.Red(), dg = a.Green() - b.Green(), db = a.Blue() - b.Blue();
+    return dr * dr + dg * dg + db * db;
+}
+
+// Print options remembered between jobs (app config key, default).
+const std::pair<const char *, const char *> OPT_BED_LEVEL{"moonraker_bed_level", "1"};
+const std::pair<const char *, const char *> OPT_FLOW_CALIBRATE{"moonraker_flow_calibrate", "0"};
+const std::pair<const char *, const char *> OPT_TIMELAPSE{"moonraker_timelapse", "0"};
+
+bool get_option(const std::pair<const char *, const char *> &opt)
+{
+    const std::string value = wxGetApp().app_config->get(opt.first);
+    return (value.empty() ? std::string(opt.second) : value) == "1";
+}
 
 std::string get_string(const json &status, const char *object, const char *field, const std::string &fallback)
 {
@@ -73,11 +107,15 @@ MoonrakerSendDialog::MoonrakerSendDialog(wxWindow *parent, DynamicPrintConfig *p
     build_header(sizer);
     build_printer(sizer, printer_name);
     build_tools(sizer);
+    build_options(sizer);
     build_buttons(sizer);
     SetSizerAndFit(sizer);
 
     m_job_name->SetValue(default_job_name);
     wxGetApp().UpdateDlgDarkUI(this);
+    fill_tool_choices();
+    auto_map();
+    update_rows();
     update_warnings();
     refresh_printer();
     CentreOnParent();
@@ -174,10 +212,10 @@ void MoonrakerSendDialog::build_tools(wxBoxSizer *sizer)
     title->SetFont(Label::Head_14);
     sizer->Add(title, 0, wxLEFT | wxRIGHT, FromDIP(16));
 
-    auto *note = new Label(this, _L("Each filament prints on the toolhead with the same number. The right column is what the printer reports in that toolhead."));
+    auto *note = new Label(this, _L("Pick the toolhead that prints each filament. The list shows what the printer has loaded in each toolhead; the closest match is picked for you."));
     note->SetFont(Label::Body_12);
     note->SetForegroundColour(COLOUR_MUTED);
-    note->Wrap(FromDIP(500));
+    note->Wrap(FromDIP(520));
     sizer->Add(note, 0, wxLEFT | wxRIGHT | wxTOP, FromDIP(16));
 
     PresetBundle *bundle = wxGetApp().preset_bundle;
@@ -186,8 +224,10 @@ void MoonrakerSendDialog::build_tools(wxBoxSizer *sizer)
     std::sort(used.begin(), used.end());
     used.erase(std::unique(used.begin(), used.end()), used.end());
 
-    auto *grid = new wxFlexGridSizer(0, 6, FromDIP(10), FromDIP(10));
-    grid->AddGrowableCol(5);
+    m_tools.assign(m_tool_count, ToolInfo());
+
+    auto *grid = new wxFlexGridSizer(0, 5, FromDIP(10), FromDIP(10));
+    grid->AddGrowableCol(4);
     for (int id : used) {
         FilamentRow row;
         row.filament = id - 1;
@@ -202,25 +242,17 @@ void MoonrakerSendDialog::build_tools(wxBoxSizer *sizer)
         grid->Add(project, 0, wxALIGN_CENTER_VERTICAL);
         grid->Add(new Label(this, wxString::FromUTF8("→")), 0, wxALIGN_CENTER_VERTICAL);
 
-        auto *tool = new Label(this, wxString::Format(_L("Toolhead %d"), id));
-        tool->SetFont(Label::Head_13);
-        grid->Add(tool, 0, wxALIGN_CENTER_VERTICAL);
-
-        auto *printer = new wxBoxSizer(wxHORIZONTAL);
-        row.printer_swatch = make_swatch(this, wxNullColour, FromDIP(20));
-        row.printer_label  = new Label(this, wxString::FromUTF8("—"));
-        row.printer_label->SetFont(Label::Body_13);
-        printer->Add(row.printer_swatch, 0, wxALIGN_CENTER_VERTICAL);
-        printer->Add(row.printer_label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
-        grid->Add(printer, 0, wxALIGN_CENTER_VERTICAL);
+        row.tool_choice = new ComboBox(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(230), -1), 0, nullptr, wxCB_READONLY);
+        row.tool_choice->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent &) {
+            m_user_mapped = true;
+            update_rows();
+            update_warnings();
+        });
+        grid->Add(row.tool_choice, 0, wxALIGN_CENTER_VERTICAL);
 
         row.state_label = new Label(this, wxEmptyString);
         row.state_label->SetFont(Label::Body_12);
         grid->Add(row.state_label, 0, wxALIGN_CENTER_VERTICAL);
-        if (row.filament >= (int) m_tool_count) {
-            row.state_label->SetLabel(_L("No such toolhead"));
-            row.state_label->SetForegroundColour(COLOUR_ERROR);
-        }
         m_rows.push_back(row);
     }
     sizer->Add(grid, 0, wxEXPAND | wxALL, FromDIP(16));
@@ -228,6 +260,38 @@ void MoonrakerSendDialog::build_tools(wxBoxSizer *sizer)
     m_warning = new Label(this, wxEmptyString);
     m_warning->SetFont(Label::Body_13);
     sizer->Add(m_warning, 0, wxLEFT | wxRIGHT, FromDIP(16));
+}
+
+void MoonrakerSendDialog::build_options(wxBoxSizer *sizer)
+{
+    m_options = new wxPanel(this);
+    m_options->SetBackgroundColour(GetBackgroundColour());
+    auto *box = new wxBoxSizer(wxVERTICAL);
+
+    auto *title = new Label(m_options, _L("Print options"));
+    title->SetFont(Label::Head_14);
+    box->Add(title, 0, wxBOTTOM, FromDIP(8));
+
+    auto *row = new wxBoxSizer(wxHORIZONTAL);
+    auto add = [this, row](CheckBox *&check, const std::pair<const char *, const char *> &opt, const wxString &text, const wxString &tip) {
+        check = new CheckBox(m_options);
+        check->SetValue(get_option(opt));
+        check->SetToolTip(tip);
+        auto *label = new Label(m_options, text);
+        label->SetFont(Label::Body_13);
+        label->SetToolTip(tip);
+        label->Bind(wxEVT_LEFT_DOWN, [check](wxMouseEvent &) { check->SetValue(!check->GetValue()); });
+        row->Add(check, 0, wxALIGN_CENTER_VERTICAL);
+        row->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(6));
+        row->AddSpacer(FromDIP(18));
+    };
+    add(m_opt_bed_level, OPT_BED_LEVEL, _L("Bed leveling"), _L("Probe the bed before printing."));
+    add(m_opt_flow_calibrate, OPT_FLOW_CALIBRATE, _L("Flow calibration"), _L("Calibrate extrusion flow on the toolheads in use before printing."));
+    add(m_opt_timelapse, OPT_TIMELAPSE, _L("Timelapse"), _L("Record a timelapse with the printer's camera."));
+    box->Add(row, 0);
+
+    m_options->SetSizer(box);
+    sizer->Add(m_options, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(16));
 }
 
 void MoonrakerSendDialog::build_buttons(wxBoxSizer *sizer)
@@ -328,48 +392,126 @@ void MoonrakerSendDialog::apply_printer_status(const std::string &reply, const w
         const json &values = tasks.contains(key) ? tasks.at(key) : json();
         return values.is_array() && i < values.size() ? values.at(i) : json();
     };
+    m_is_snapmaker = !tasks.empty();
+    for (size_t i = 0; i < m_tools.size(); ++i) {
+        ToolInfo info;
+        if (m_is_snapmaker) {
+            const json exists = at("filament_exist", i);
+            const json type   = at("filament_type", i);
+            const json sub    = at("filament_sub_type", i);
+            const json rgba   = at("filament_color_rgba", i);
+            info.reported = true;
+            info.loaded   = !(exists.is_boolean() && !exists.get<bool>());
+            info.type     = wxString::FromUTF8(type.is_string() ? type.get<std::string>() : std::string());
+            const wxString sub_s = wxString::FromUTF8(sub.is_string() ? sub.get<std::string>() : std::string());
+            info.label = sub_s.empty() ? info.type : info.type + " " + sub_s;
+            if (rgba.is_string() && rgba.get<std::string>().size() >= 6)
+                info.colour = wxColour("#" + wxString::FromUTF8(rgba.get<std::string>().substr(0, 6)));
+        }
+        m_tools[i] = info;
+    }
+    if (m_options)
+        m_options->Show(m_is_snapmaker || !m_printer_reachable);
+    fill_tool_choices();
+    if (!m_user_mapped)
+        auto_map();
+    update_rows();
+    update_warnings();
+}
+
+void MoonrakerSendDialog::fill_tool_choices()
+{
     for (FilamentRow &row : m_rows) {
-        if (row.filament >= (int) m_tool_count)
+        const int selection = row.tool_choice->GetSelection();
+        row.tool_choice->Clear();
+        for (size_t i = 0; i < m_tools.size(); ++i) {
+            const ToolInfo &tool = m_tools[i];
+            wxString        text = wxString::Format(_L("Toolhead %d"), (int) i + 1);
+            if (tool.reported)
+                text += wxString::FromUTF8("  ·  ") + (tool.loaded ? tool.label : _L("Empty"));
+            row.tool_choice->Append(text, swatch_bitmap(tool.reported && tool.loaded ? tool.colour : wxNullColour, FromDIP(16)));
+        }
+        if (selection >= 0 && selection < (int) m_tools.size())
+            row.tool_choice->SetSelection(selection);
+        // Only Snapmaker printers take a toolhead map; elsewhere filament k prints on tool k.
+        row.tool_choice->Enable(m_is_snapmaker);
+    }
+}
+
+// Bambu-style automatic mapping: each filament goes to a loaded toolhead with the same filament
+// type and the closest colour, preferring toolheads no other filament took; without a match it
+// keeps its own number.
+void MoonrakerSendDialog::auto_map()
+{
+    std::vector<bool> taken(m_tools.size(), false);
+    for (FilamentRow &row : m_rows) {
+        int best = -1, best_score = 0;
+        if (m_is_snapmaker)
+            for (size_t i = 0; i < m_tools.size(); ++i) {
+                const ToolInfo &tool = m_tools[i];
+                if (!tool.loaded || tool.type.empty() || tool.type.Upper() != row.type.Upper())
+                    continue;
+                const int score = colour_distance(row.colour, tool.colour) + (taken[i] ? 4 * 255 * 255 : 0);
+                if (best < 0 || score < best_score) {
+                    best       = (int) i;
+                    best_score = score;
+                }
+            }
+        if (best < 0)
+            best = row.filament < (int) m_tools.size() ? row.filament : 0;
+        if (best < (int) m_tools.size()) {
+            taken[best] = true;
+            row.tool_choice->SetSelection(best);
+        }
+    }
+}
+
+void MoonrakerSendDialog::update_rows()
+{
+    m_mismatch    = false;
+    m_shared_tool = false;
+    std::vector<int> users(m_tools.size(), 0);
+    for (const FilamentRow &row : m_rows) {
+        const int tool = row.tool_choice->GetSelection();
+        if (tool >= 0 && tool < (int) users.size())
+            ++users[tool];
+    }
+    for (FilamentRow &row : m_rows) {
+        const int tool = row.tool_choice->GetSelection();
+        if (!m_is_snapmaker && row.filament >= (int) m_tool_count) {
+            row.state_label->SetLabel(_L("No such toolhead"));
+            row.state_label->SetForegroundColour(COLOUR_ERROR);
             continue;
-        const size_t tool = (size_t) row.filament;
-        if (tasks.empty()) {
-            row.printer_label->SetLabel(m_printer_reachable ? _L("Not reported") : wxString::FromUTF8("—"));
+        }
+        if (tool < 0 || tool >= (int) m_tools.size() || !m_tools[tool].reported) {
             row.state_label->SetLabel(wxEmptyString);
             continue;
         }
-        const json exists = at("filament_exist", tool);
-        const json type   = at("filament_type", tool);
-        const json sub    = at("filament_sub_type", tool);
-        const json rgba   = at("filament_color_rgba", tool);
-        if (exists.is_boolean() && !exists.get<bool>()) {
-            row.printer_label->SetLabel(_L("Empty"));
-            row.printer_swatch->SetBackgroundColour(*wxLIGHT_GREY);
+        const ToolInfo &info = m_tools[tool];
+        if (!info.loaded) {
             row.state_label->SetLabel(_L("No filament loaded"));
             row.state_label->SetForegroundColour(COLOUR_ERROR);
             m_mismatch = true;
+        } else if (!info.type.empty() && !row.type.empty() && info.type.Upper() != row.type.Upper()) {
+            row.state_label->SetLabel(_L("Different filament type"));
+            row.state_label->SetForegroundColour(COLOUR_WARN);
+            m_mismatch = true;
+        } else if (users[tool] > 1) {
+            row.state_label->SetLabel(_L("Shares a toolhead"));
+            row.state_label->SetForegroundColour(COLOUR_WARN);
+            m_shared_tool = true;
         } else {
-            const std::string type_s = type.is_string() ? type.get<std::string>() : std::string();
-            const std::string sub_s  = sub.is_string() ? sub.get<std::string>() : std::string();
-            row.printer_label->SetLabel(wxString::FromUTF8(sub_s.empty() ? type_s : type_s + " " + sub_s));
-            if (rgba.is_string() && rgba.get<std::string>().size() >= 6)
-                row.printer_swatch->SetBackgroundColour(wxColour("#" + wxString::FromUTF8(rgba.get<std::string>().substr(0, 6))));
-            if (!type_s.empty() && !row.type.empty() && upper(type_s) != row.type.Upper()) {
-                row.state_label->SetLabel(_L("Different filament type"));
-                row.state_label->SetForegroundColour(COLOUR_WARN);
-                m_mismatch = true;
-            } else {
-                row.state_label->SetLabel(wxString::FromUTF8("✓ ") + _L("Matches"));
-                row.state_label->SetForegroundColour(COLOUR_OK);
-            }
+            row.state_label->SetLabel(wxString::FromUTF8("✓ ") + _L("Matches"));
+            row.state_label->SetForegroundColour(COLOUR_OK);
         }
-        row.printer_swatch->Refresh();
     }
-    update_warnings();
 }
 
 void MoonrakerSendDialog::update_warnings()
 {
-    const bool missing_tool = std::any_of(m_rows.begin(), m_rows.end(), [this](const FilamentRow &r) { return r.filament >= (int) m_tool_count; });
+    // Without a toolhead map (non-Snapmaker printers) filament k needs tool k.
+    const bool missing_tool = !m_is_snapmaker && m_printer_reachable &&
+                              std::any_of(m_rows.begin(), m_rows.end(), [this](const FilamentRow &r) { return r.filament >= (int) m_tool_count; });
 
     wxString text;
     wxColour colour = COLOUR_WARN;
@@ -381,7 +523,9 @@ void MoonrakerSendDialog::update_warnings()
     } else if (m_printer_busy) {
         text = _L("The printer is busy. Upload the job now and start it when the printer is free.");
     } else if (m_mismatch) {
-        text = _L("Some toolheads hold a different filament than the job expects. Check them before printing.");
+        text = _L("Some toolheads hold a different filament than the job expects. Pick another toolhead or check them before printing.");
+    } else if (m_shared_tool) {
+        text = _L("More than one filament prints with the same toolhead, so those parts come out in one colour.");
     } else if (!m_printer_reachable) {
         text = _L("The printer cannot be reached right now. Uploading will be retried in the upload queue.");
     }
@@ -389,7 +533,7 @@ void MoonrakerSendDialog::update_warnings()
     m_warning->SetForegroundColour(colour);
     m_warning->Wrap(FromDIP(500));
 
-    m_btn_upload->Enable(!missing_tool && !m_rows.empty());
+    m_btn_upload->Enable(!m_rows.empty());
     m_btn_print->Enable(!missing_tool && !m_rows.empty() && m_printer_reachable && !m_printer_busy);
     Layout();
     Fit();
@@ -404,7 +548,30 @@ void MoonrakerSendDialog::finish(PrintHostPostUploadAction action)
     }
     m_job_name->SetValue(name);
     m_post_action = action;
+    if (m_opt_bed_level) {
+        wxGetApp().app_config->set(OPT_BED_LEVEL.first, m_opt_bed_level->GetValue() ? "1" : "0");
+        wxGetApp().app_config->set(OPT_FLOW_CALIBRATE.first, m_opt_flow_calibrate->GetValue() ? "1" : "0");
+        wxGetApp().app_config->set(OPT_TIMELAPSE.first, m_opt_timelapse->GetValue() ? "1" : "0");
+    }
     EndModal(wxID_OK);
+}
+
+std::string MoonrakerSendDialog::start_options() const
+{
+    if (!m_is_snapmaker)
+        return {};
+    // Same shape Snapmaker Orca sends: map_table pairs are [G-code tool, toolhead], both 0-based.
+    json map_table = json::array();
+    for (const FilamentRow &row : m_rows) {
+        const int tool = row.tool_choice->GetSelection();
+        if (tool >= 0)
+            map_table.push_back({row.filament, tool});
+    }
+    json options = {{"bed_level", m_opt_bed_level->GetValue() ? 1 : 0},
+                    {"flow_calibrate", m_opt_flow_calibrate->GetValue() ? 1 : 0},
+                    {"map_table", map_table},
+                    {"time_lapse_camera", m_opt_timelapse->GetValue() ? 1 : 0}};
+    return options.dump();
 }
 
 wxString MoonrakerSendDialog::filename() const

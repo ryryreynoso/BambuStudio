@@ -1,6 +1,11 @@
 #include "Moonraker.hpp"
 
+#include <chrono>
 #include <sstream>
+#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/websocket.hpp>
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -10,6 +15,8 @@
 #include "slic3r/GUI/I18N.hpp"
 #include "Http.hpp"
 #include "libslic3r/PrintConfig.hpp"
+
+#include <nlohmann/json.hpp>
 
 namespace pt = boost::property_tree;
 
@@ -120,6 +127,116 @@ std::string Moonraker::query_objects(const std::vector<std::string> &objects, wx
     return status;
 }
 
+bool Moonraker::get_file(const std::string &path, std::string &body, wxString &msg) const
+{
+    const std::string base = find_base_url(msg);
+    if (base.empty())
+        return false;
+    bool ok   = false;
+    auto http = Http::get(base + "server/files/" + path);
+    set_auth(http);
+    http.on_error([&](std::string reply, std::string error, unsigned status) { msg = format_error(reply, error, status); })
+        .on_complete([&](std::string reply, unsigned) {
+            body = std::move(reply);
+            ok   = true;
+        })
+#ifdef WIN32
+        .ssl_revoke_best_effort(m_ssl_revoke_best_effort)
+#endif
+        .perform_sync();
+    return ok;
+}
+
+bool Moonraker::start_local_print(const std::string &path, const std::string &options, wxString &msg) const
+{
+    namespace beast     = boost::beast;
+    namespace websocket = boost::beast::websocket;
+    using tcp           = boost::asio::ip::tcp;
+    using json          = nlohmann::json;
+
+    const std::string base = find_base_url(msg);
+    if (base.empty())
+        return false;
+    if (base.rfind("http://", 0) != 0) {
+        msg = _L("Starting a Snapmaker print needs an http:// printer address.");
+        return false;
+    }
+    // base is http://authority/prefix/ ; Moonraker's websocket is prefix + "websocket".
+    const std::string rest      = base.substr(7);
+    const size_t      slash     = rest.find('/');
+    const std::string authority = rest.substr(0, slash);
+    const std::string target    = (slash == std::string::npos ? std::string("/") : rest.substr(slash)) + "websocket";
+    std::string       host = authority, port = "80";
+    const size_t      colon = authority.rfind(':');
+    if (colon != std::string::npos && authority.find(']', colon) == std::string::npos) {
+        host = authority.substr(0, colon);
+        port = authority.substr(colon + 1);
+    }
+    if (host.size() > 1 && host.front() == '[' && host.back() == ']')
+        host = host.substr(1, host.size() - 2);
+
+    const int request_id = 3170;
+    json      request;
+    try {
+        request = {{"jsonrpc", "2.0"},
+                   {"method", "server.files.start_local_print"},
+                   {"params", {{"type", "gcode"}, {"path", path}, {"print_plate", 1}, {"options", json::parse(options)}, {"extra_info", {{"print_task_id", ""}}}}},
+                   {"id", request_id}};
+    } catch (const std::exception &) {
+        msg = _L("The print options could not be read.");
+        return false;
+    }
+    BOOST_LOG_TRIVIAL(info) << "Moonraker: start_local_print " << request.dump();
+
+    try {
+        boost::asio::io_context ioc;
+        tcp::resolver           resolver(ioc);
+        websocket::stream<beast::tcp_stream> ws(ioc);
+        beast::get_lowest_layer(ws).connect(resolver.resolve(host, port));
+
+        // Blocking reads on this socket give up after 30 s instead of hanging the upload queue.
+#ifdef _WIN32
+        DWORD timeout_ms = 30000;
+        ::setsockopt(beast::get_lowest_layer(ws).socket().native_handle(), SOL_SOCKET, SO_RCVTIMEO, (const char *) &timeout_ms, sizeof(timeout_ms));
+#else
+        struct timeval timeout{30, 0};
+        ::setsockopt(beast::get_lowest_layer(ws).socket().native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#endif
+        const std::string apikey = m_apikey;
+        ws.set_option(websocket::stream_base::decorator([apikey](websocket::request_type &req) {
+            if (!apikey.empty())
+                req.set("X-Api-Key", apikey);
+        }));
+        ws.handshake(authority, target);
+        ws.text(true);
+        ws.write(boost::asio::buffer(request.dump()));
+
+        // Moonraker also pushes status notifications on this socket; wait for the reply to our id.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (std::chrono::steady_clock::now() < deadline) {
+            beast::flat_buffer buffer;
+            ws.read(buffer);
+            json reply = json::parse(beast::buffers_to_string(buffer.data()), nullptr, false);
+            if (!reply.is_object() || !reply.contains("id") || reply["id"] != request_id)
+                continue;
+            BOOST_LOG_TRIVIAL(info) << "Moonraker: start_local_print reply " << reply.dump();
+            boost::system::error_code ignored;
+            ws.close(websocket::close_code::normal, ignored);
+            if (reply.contains("error")) {
+                const json &error = reply["error"];
+                msg = wxString::FromUTF8(error.is_object() ? error.value("message", error.dump()) : error.dump());
+                return false;
+            }
+            return true;
+        }
+        msg = _L("The printer did not answer the print start in time.");
+    } catch (const std::exception &e) {
+        BOOST_LOG_TRIVIAL(error) << "Moonraker: start_local_print failed: " << e.what();
+        msg = wxString::FromUTF8(e.what());
+    }
+    return false;
+}
+
 wxString Moonraker::get_test_ok_msg() const
 {
     return _L("Connection to Moonraker works correctly.");
@@ -143,7 +260,9 @@ bool Moonraker::upload(PrintHostUpload upload_data, ProgressFn prorgess_fn, Erro
 
     const auto upload_filename    = upload_data.upload_path.filename();
     const auto upload_parent_path = upload_data.upload_path.parent_path();
-    const bool start_print        = upload_data.post_action == PrintHostPostUploadAction::StartPrint;
+    // With Snapmaker start options the file is only uploaded here and started below with them.
+    const bool start_with_options = upload_data.post_action == PrintHostPostUploadAction::StartPrint && !upload_data.start_options.empty();
+    const bool start_print        = upload_data.post_action == PrintHostPostUploadAction::StartPrint && !start_with_options;
     std::string url               = base + "server/files/upload";
 
     BOOST_LOG_TRIVIAL(info) << boost::format("%1%: Uploading file %2% at %3%, filename: %4%, path: %5%, print: %6%") % name % upload_data.source_path % url %
@@ -176,6 +295,13 @@ bool Moonraker::upload(PrintHostUpload upload_data, ProgressFn prorgess_fn, Erro
 #endif
         .perform_sync();
 
+    if (res && start_with_options) {
+        wxString start_msg;
+        if (!start_local_print(upload_data.upload_path.generic_string(), upload_data.start_options, start_msg)) {
+            error_fn(_L("The job was uploaded but did not start") + ": " + start_msg);
+            res = false;
+        }
+    }
     return res;
 }
 

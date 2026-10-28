@@ -52,6 +52,7 @@ class MainFrame;
 class ParamsDialog;
 class FilamentGroupPopup;
 class DeviceWebPage;
+class MoonrakerDevicePanel;
 
 enum QuickSlice
 {
@@ -400,6 +401,7 @@ public:
     DeviceWebPage*        m_web_device{ nullptr };
     WebViewPanel*         m_webview { nullptr };
     PrinterWebView*       m_printer_view{nullptr};
+    MoonrakerDevicePanel* m_moonraker_device{nullptr};
     wxLogWindow*          m_log_window { nullptr };
     // BBS
     //wxBookCtrlBase*       m_tabpanel { nullptr };

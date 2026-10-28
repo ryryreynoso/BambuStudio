@@ -34,6 +34,11 @@ struct PrintHostUpload
     std::string group;
     
     PrintHostPostUploadAction post_action { PrintHostPostUploadAction::None };
+
+    // Snapmaker printers: JSON options for server.files.start_local_print (toolhead map_table, bed
+    // leveling, flow calibration, timelapse). When set, StartPrint uploads first and then starts the
+    // print with these options instead of the plain upload-and-print.
+    std::string start_options;
 };
 
 class PrintHost

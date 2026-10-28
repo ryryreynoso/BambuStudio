@@ -24864,6 +24864,8 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
             return;
         upload_job.upload_data.upload_path = into_path(dlg.filename());
         upload_job.upload_data.post_action = post_action = dlg.post_action();
+        if (post_action == PrintHostPostUploadAction::StartPrint)
+            upload_job.upload_data.start_options = dlg.start_options();
     } else {
         // Repetier specific: Query the server for the list of file groups.
         wxArrayString groups;

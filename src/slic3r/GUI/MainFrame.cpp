@@ -1,4 +1,5 @@
 #include "MainFrame.hpp"
+#include "MoonrakerDevicePanel.hpp"
 #include "GLToolbar.hpp"
 #include <wx/panel.h>
 #include <wx/notebook.h>
@@ -1535,6 +1536,10 @@ void MainFrame::init_tabpanel()
     });
     m_printer_view->Hide();
 
+    // Moonraker printers (Snapmaker U1) get a native device page instead of the printer's web UI.
+    m_moonraker_device = new MoonrakerDevicePanel(m_tabpanel);
+    m_moonraker_device->Hide();
+
     if (wxGetApp().is_enable_multi_machine()) {
         m_multi_machine = new MultiMachinePage(m_tabpanel, wxID_ANY, wxDefaultPosition, wxDefaultSize);
         m_multi_machine->SetBackgroundColour(*wxWHITE);
@@ -1572,29 +1577,30 @@ void MainFrame::init_tabpanel()
 
 // OrcaSlicer
 void MainFrame::show_device(bool bBBLPrinter) {
-  if (m_tabpanel->GetPage(tpMonitor) != m_monitor &&
-      m_tabpanel->GetPage(tpMonitor) != m_printer_view) {
+  wxWindow *current = m_tabpanel->GetPage(tpMonitor);
+  if (current != m_monitor && current != m_printer_view && current != m_moonraker_device) {
     BOOST_LOG_TRIVIAL(error) << "Failed to find device tab";
     return;
   }
-  if (bBBLPrinter) {
-    if (m_tabpanel->GetPage(tpMonitor) != m_monitor) {
-        m_printer_view->Show(false);
-        m_monitor->Show(false);
-        m_tabpanel->RemovePage(tpMonitor);
-        m_tabpanel->InsertPage(tpMonitor, m_monitor, _L("Device"),
-                             std::string("tab_monitor_active"),
-                             std::string("tab_monitor_active"), false);
+  // Bambu printers: Bambu's monitor. Moonraker printers (Snapmaker U1): the native device page.
+  // Other printers: their web UI.
+  wxWindow *page = m_monitor;
+  if (!bBBLPrinter) {
+    page = m_printer_view;
+    const Preset &preset = wxGetApp().preset_bundle->printers.get_edited_preset();
+    const auto *host_type = preset.config.option<ConfigOptionEnum<PrintHostType>>("host_type");
+    if (host_type && host_type->value == htMoonraker) {
+        page = m_moonraker_device;
+        m_moonraker_device->set_printer(preset.name, preset.config);
     }
-  } else {
-    if (m_tabpanel->GetPage(tpMonitor) != m_printer_view) {
-        m_printer_view->Show(false);
-        m_monitor->Show(false);
-        m_tabpanel->RemovePage(tpMonitor);
-        m_tabpanel->InsertPage(tpMonitor, m_printer_view, _L("Device"),
-                          std::string("tab_monitor_active"),
-                          std::string("tab_monitor_active"), false);
-    }
+  }
+  if (current != page) {
+    const bool selected = m_tabpanel->GetSelection() == tpMonitor;
+    current->Show(false);
+    m_tabpanel->RemovePage(tpMonitor);
+    m_tabpanel->InsertPage(tpMonitor, page, _L("Device"),
+                         std::string("tab_monitor_active"),
+                         std::string("tab_monitor_active"), selected);
   }
 }
 
@@ -2748,6 +2754,8 @@ void MainFrame::on_dpi_changed(const wxRect& suggested_rect)
     m_param_panel->msw_rescale();
     m_project->msw_rescale();
     m_monitor->msw_rescale();
+    if (m_moonraker_device)
+        m_moonraker_device->msw_rescale();
     if (m_multi_machine)
         m_multi_machine->msw_rescale();
     m_calibration->msw_rescale();

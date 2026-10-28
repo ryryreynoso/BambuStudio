@@ -296,6 +296,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/ParamsPanel.hpp
     GUI/PrintHostDialogs.cpp
     GUI/PrintHostDialogs.hpp
+    GUI/MoonrakerDevicePanel.cpp
+    GUI/MoonrakerDevicePanel.hpp
     GUI/MoonrakerSendDialog.cpp
     GUI/MoonrakerSendDialog.hpp
     GUI/AmsWidgets.cpp
