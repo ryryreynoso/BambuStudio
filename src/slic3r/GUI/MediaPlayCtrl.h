@@ -78,7 +78,7 @@ protected:
 private:
     void load();
 
-    void start_device_image_flow();
+    void start_device_image_flow(bool force = false);
 
     void on_show_hide(wxShowEvent & evt);
 
@@ -144,6 +144,10 @@ private:
 
     std::shared_ptr<int> m_image_token = std::make_shared<int>(0);
     std::chrono::steady_clock::time_point m_image_last_success_time;
+    std::chrono::steady_clock::time_point m_image_last_request_time;
+    // 3D Print: the cloud refused liveview, so the printer's preview picture (over LAN) is refreshed
+    // every few seconds in its place.
+    bool m_preview_only = false;
     std::string m_image_last_machine;
 
     ::Button *m_button_play;

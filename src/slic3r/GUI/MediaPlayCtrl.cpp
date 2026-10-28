@@ -234,6 +234,9 @@ MediaPlayCtrl::~MediaPlayCtrl()
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << ": " << this;
 }
 
+// 3D Print: how often the preview picture is fetched again while it stands in for liveview.
+static const int PREVIEW_REFRESH_S = 3;
+
 void MediaPlayCtrl::SetMachineObject(MachineObject* obj)
 {
     std::string machine = obj ? obj->get_dev_id() : "";
@@ -266,6 +269,13 @@ void MediaPlayCtrl::SetMachineObject(MachineObject* obj)
     if (machine == m_machine) {
         if (m_last_state == MEDIASTATE_IDLE && IsEnabled())
             Play();
+        if (m_preview_only && m_last_state == MEDIASTATE_IDLE && IsEnabled() && IsShownOnScreen()) {
+            auto now        = std::chrono::steady_clock::now();
+            auto since_ask  = std::chrono::duration_cast<std::chrono::seconds>(now - m_image_last_request_time).count();
+            bool answered   = m_image_last_success_time >= m_image_last_request_time;
+            if (since_ask >= PREVIEW_REFRESH_S && (answered || since_ask >= 15))
+                start_device_image_flow(true);
+        }
         if (m_last_state == MEDIASTATE_LOADING || m_last_state == MEDIASTATE_INITIALIZING) {
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::system_clock::now() - m_play_timer).count();
@@ -305,6 +315,7 @@ void MediaPlayCtrl::SetMachineObject(MachineObject* obj)
     m_machine = machine;
     BOOST_LOG_TRIVIAL(info) << "MediaPlayCtrl switch machine: " << BBLCrossTalk::Crosstalk_DevId(m_machine);
     m_disable_lan = false;
+    m_preview_only = false;
     m_failed_retry = 0;
     m_last_failed_codes.clear();
     m_image_last_machine.clear();
@@ -533,8 +544,11 @@ void MediaPlayCtrl::Play()
                         }
                         // 3D Print: Bambu's cloud only streams to Bambu's own signed app, so when it refuses
                         // and the printer's LAN stream is off, say which printer setting makes it work here.
-                        if (m_failed_code == 403 && m_lan_proto == MachineObject::LVL_Disable)
-                            Stop(_L("Bambu's cloud doesn't stream the camera to 3D Print. Turn on LAN Only Liveview on the printer's screen and the camera will play here directly."));
+                        if (m_failed_code == 403 && m_lan_proto == MachineObject::LVL_Disable) {
+                            m_preview_only = true;
+                            Stop(_L("Showing the printer's picture every few seconds. For smooth video, turn on LAN Only Liveview on the printer's screen."));
+                            start_device_image_flow(true);
+                        }
                         else
                             Stop(_L("Connection Failed. Please check the network and try again"), from_u8(url));
                     } else {
@@ -867,7 +881,7 @@ void MediaPlayCtrl::RequestFileSystemUrl(std::function<void(std::string url)> cb
     });
 }
 
-void MediaPlayCtrl::start_device_image_flow()
+void MediaPlayCtrl::start_device_image_flow(bool force)
 {
     if (!m_support_liveview_preview) {
         m_media_ctrl->SetIdleImage(from_u8(resources_dir() + "/images/liveview_bg.png"));
@@ -883,7 +897,7 @@ void MediaPlayCtrl::start_device_image_flow()
 
     // If we already have a valid cached image for this machine fetched within 30s, skip
     auto now = std::chrono::steady_clock::now();
-    if (!m_machine.empty() && m_image_last_machine == m_machine
+    if (!force && !m_machine.empty() && m_image_last_machine == m_machine
         && m_image_last_success_time.time_since_epoch().count() > 0
         && std::chrono::duration_cast<std::chrono::seconds>(now - m_image_last_success_time).count() < 30) {
         BOOST_LOG_TRIVIAL(info) << "DeviceImageFlow: skipped, using cached image (fetched "
@@ -892,6 +906,7 @@ void MediaPlayCtrl::start_device_image_flow()
     }
 
     BOOST_LOG_TRIVIAL(info) << "DeviceImageFlow: begin requesting device image";
+    m_image_last_request_time = now;
 
     // Only reset to default image if we don't have a cached preview for this machine
     if (m_image_last_machine != m_machine) {
