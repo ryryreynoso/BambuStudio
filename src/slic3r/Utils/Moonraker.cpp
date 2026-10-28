@@ -147,7 +147,7 @@ bool Moonraker::get_file(const std::string &path, std::string &body, wxString &m
     return ok;
 }
 
-bool Moonraker::start_local_print(const std::string &path, const std::string &options, wxString &msg) const
+bool Moonraker::websocket_call(const std::string &method, const std::string &params, int timeout_s, wxString &msg) const
 {
     namespace beast     = boost::beast;
     namespace websocket = boost::beast::websocket;
@@ -158,7 +158,7 @@ bool Moonraker::start_local_print(const std::string &path, const std::string &op
     if (base.empty())
         return false;
     if (base.rfind("http://", 0) != 0) {
-        msg = _L("Starting a Snapmaker print needs an http:// printer address.");
+        msg = _L("This needs an http:// printer address.");
         return false;
     }
     // base is http://authority/prefix/ ; Moonraker's websocket is prefix + "websocket".
@@ -178,15 +178,12 @@ bool Moonraker::start_local_print(const std::string &path, const std::string &op
     const int request_id = 3170;
     json      request;
     try {
-        request = {{"jsonrpc", "2.0"},
-                   {"method", "server.files.start_local_print"},
-                   {"params", {{"type", "gcode"}, {"path", path}, {"print_plate", 1}, {"options", json::parse(options)}, {"extra_info", {{"print_task_id", ""}}}}},
-                   {"id", request_id}};
+        request = {{"jsonrpc", "2.0"}, {"method", method}, {"params", json::parse(params)}, {"id", request_id}};
     } catch (const std::exception &) {
-        msg = _L("The print options could not be read.");
+        msg = _L("The request could not be built.");
         return false;
     }
-    BOOST_LOG_TRIVIAL(info) << "Moonraker: start_local_print " << request.dump();
+    BOOST_LOG_TRIVIAL(info) << "Moonraker: " << method << " " << request.dump();
 
     try {
         boost::asio::io_context ioc;
@@ -194,12 +191,12 @@ bool Moonraker::start_local_print(const std::string &path, const std::string &op
         websocket::stream<beast::tcp_stream> ws(ioc);
         beast::get_lowest_layer(ws).connect(resolver.resolve(host, port));
 
-        // Blocking reads on this socket give up after 30 s instead of hanging the upload queue.
+        // Blocking reads on this socket give up after the timeout instead of hanging the caller.
 #ifdef _WIN32
-        DWORD timeout_ms = 30000;
+        DWORD timeout_ms = timeout_s * 1000;
         ::setsockopt(beast::get_lowest_layer(ws).socket().native_handle(), SOL_SOCKET, SO_RCVTIMEO, (const char *) &timeout_ms, sizeof(timeout_ms));
 #else
-        struct timeval timeout{30, 0};
+        struct timeval timeout{timeout_s, 0};
         ::setsockopt(beast::get_lowest_layer(ws).socket().native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 #endif
         const std::string apikey = m_apikey;
@@ -212,14 +209,14 @@ bool Moonraker::start_local_print(const std::string &path, const std::string &op
         ws.write(boost::asio::buffer(request.dump()));
 
         // Moonraker also pushes status notifications on this socket; wait for the reply to our id.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_s);
         while (std::chrono::steady_clock::now() < deadline) {
             beast::flat_buffer buffer;
             ws.read(buffer);
             json reply = json::parse(beast::buffers_to_string(buffer.data()), nullptr, false);
             if (!reply.is_object() || !reply.contains("id") || reply["id"] != request_id)
                 continue;
-            BOOST_LOG_TRIVIAL(info) << "Moonraker: start_local_print reply " << reply.dump();
+            BOOST_LOG_TRIVIAL(info) << "Moonraker: " << method << " reply " << reply.dump();
             boost::system::error_code ignored;
             ws.close(websocket::close_code::normal, ignored);
             if (reply.contains("error")) {
@@ -229,12 +226,34 @@ bool Moonraker::start_local_print(const std::string &path, const std::string &op
             }
             return true;
         }
-        msg = _L("The printer did not answer the print start in time.");
+        msg = _L("The printer did not answer in time.");
     } catch (const std::exception &e) {
-        BOOST_LOG_TRIVIAL(error) << "Moonraker: start_local_print failed: " << e.what();
+        BOOST_LOG_TRIVIAL(error) << "Moonraker: " << method << " failed: " << e.what();
         msg = wxString::FromUTF8(e.what());
     }
     return false;
+}
+
+bool Moonraker::start_local_print(const std::string &path, const std::string &options, wxString &msg) const
+{
+    using json = nlohmann::json;
+    std::string params;
+    try {
+        params = json{{"type", "gcode"}, {"path", path}, {"print_plate", 1}, {"options", json::parse(options)}, {"extra_info", {{"print_task_id", ""}}}}.dump();
+    } catch (const std::exception &) {
+        msg = _L("The print options could not be read.");
+        return false;
+    }
+    return websocket_call("server.files.start_local_print", params, 30, msg);
+}
+
+bool Moonraker::camera_monitor(bool on, wxString &msg) const
+{
+    // As Snapmaker Orca asks it: with the monitor on, the U1 rewrites camera/monitor.jpg about twice
+    // a second (interval 0); without it the picture only changes while printing. The U1 acts on these
+    // without answering on Moonraker's websocket, so the wait for a reply is kept short.
+    return on ? websocket_call("camera.start_monitor", R"({"domain":"lan","interval":0,"expect_pw":true})", 2, msg)
+              : websocket_call("camera.stop_monitor", R"({"domain":"lan"})", 2, msg);
 }
 
 wxString Moonraker::get_test_ok_msg() const

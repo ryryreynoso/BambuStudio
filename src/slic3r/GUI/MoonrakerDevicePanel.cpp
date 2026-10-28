@@ -37,7 +37,12 @@ const wxColour COLOUR_MUTED("#909090");
 const wxColour COLOUR_CARD_BORDER("#EEEEEE");
 const wxColour COLOUR_PAGE("#F7F7F7");
 
-const int POLL_MS = 3000;
+const int POLL_MS   = 3000;
+// The U1 rewrites its camera picture about twice a second while the camera monitor is on.
+const int CAMERA_MS = 500;
+// The U1 lets the monitor go about five minutes after it was last asked for, so it is asked again
+// this often while the page is open. Once the page is left it lapses even if the stop is ignored.
+const int MONITOR_RENEW_S = 60;
 
 // Klipper objects shown on the page. print_task_config (per-toolhead filament) and
 // exception_manager (errors) are Snapmaker's; other Klipper printers just leave them out.
@@ -105,26 +110,37 @@ MoonrakerDevicePanel::MoonrakerDevicePanel(wxWindow *parent)
     , m_alive(std::make_shared<bool>(true))
     , m_status_busy(std::make_shared<bool>(false))
     , m_camera_busy(std::make_shared<bool>(false))
-    , m_timer(this)
+    , m_timer(this, wxWindow::NewControlId())
+    , m_camera_timer(this, wxWindow::NewControlId())
 {
     SetBackgroundColour(COLOUR_PAGE);
     build();
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) {
         if (IsShownOnScreen())
             poll();
-    });
+    }, m_timer.GetId());
+    Bind(wxEVT_TIMER, [this](wxTimerEvent &) {
+        if (IsShownOnScreen())
+            fetch_camera();
+        else if (m_monitor_on)
+            set_monitor(false);
+    }, m_camera_timer.GetId());
     Bind(wxEVT_SHOW, [this](wxShowEvent &e) {
         e.Skip();
         if (e.IsShown())
             CallAfter([this]() { poll(); });
     });
     m_timer.Start(POLL_MS);
+    m_camera_timer.Start(CAMERA_MS);
 }
 
 MoonrakerDevicePanel::~MoonrakerDevicePanel()
 {
     *m_alive = false;
     m_timer.Stop();
+    m_camera_timer.Stop();
+    if (m_monitor_on)
+        set_monitor(false);
 }
 
 wxPanel *MoonrakerDevicePanel::make_card(wxWindow *parent, const wxString &title, wxBoxSizer *&body)
@@ -232,7 +248,7 @@ void MoonrakerDevicePanel::build()
         e.Skip();
     });
     camera_body->Add(m_camera, 1, wxEXPAND);
-    m_camera_note = new Label(camera_card, _L("The U1 takes a new picture every few seconds while it prints."));
+    m_camera_note = new Label(camera_card, _L("Live from the U1's camera, about two pictures a second."));
     m_camera_note->SetFont(Label::Body_12);
     m_camera_note->SetForegroundColour(COLOUR_MUTED);
     camera_body->Add(m_camera_note, 0, wxTOP, FromDIP(8));
@@ -360,6 +376,8 @@ void MoonrakerDevicePanel::connect_to(const wxString &address)
 
 void MoonrakerDevicePanel::apply_host(const std::string &host)
 {
+    if (m_monitor_on)
+        set_monitor(false); // on the printer the page is leaving
     m_host_address = host;
     m_address->SetLabel(wxString::FromUTF8(host));
     m_address_edit->ChangeValue(wxString::FromUTF8(host));
@@ -406,21 +424,44 @@ void MoonrakerDevicePanel::poll()
             });
         }).detach();
     }
-    if (!*m_camera_busy) {
-        *m_camera_busy = true;
-        auto busy      = m_camera_busy;
-        std::thread([this, host, alive, busy]() {
-            wxString    error;
-            std::string jpeg;
-            if (!static_cast<Moonraker *>(host.get())->get_file("camera/monitor.jpg", jpeg, error))
-                jpeg.clear();
-            wxGetApp().CallAfter([this, host, alive, busy, jpeg]() {
-                *busy = false;
-                if (*alive && host == m_host && !jpeg.empty())
-                    apply_camera(jpeg);
-            });
-        }).detach();
-    }
+    if (!m_monitor_on || !m_monitor_sent.IsValid() || (wxDateTime::Now() - m_monitor_sent).GetSeconds() >= MONITOR_RENEW_S)
+        set_monitor(true);
+}
+
+void MoonrakerDevicePanel::fetch_camera()
+{
+    auto *moonraker = dynamic_cast<Moonraker *>(m_host.get());
+    if (!moonraker || *m_camera_busy)
+        return;
+    std::shared_ptr<PrintHost> host  = m_host;
+    std::shared_ptr<bool>      alive = m_alive;
+    *m_camera_busy = true;
+    auto busy      = m_camera_busy;
+    std::thread([this, host, alive, busy]() {
+        wxString    error;
+        std::string jpeg;
+        if (!static_cast<Moonraker *>(host.get())->get_file("camera/monitor.jpg", jpeg, error))
+            jpeg.clear();
+        wxGetApp().CallAfter([this, host, alive, busy, jpeg]() {
+            *busy = false;
+            if (*alive && host == m_host && !jpeg.empty())
+                apply_camera(jpeg);
+        });
+    }).detach();
+}
+
+void MoonrakerDevicePanel::set_monitor(bool on)
+{
+    if (!dynamic_cast<Moonraker *>(m_host.get()))
+        return;
+    m_monitor_on   = on;
+    m_monitor_sent = wxDateTime::Now();
+    std::shared_ptr<PrintHost> host = m_host;
+    // Only the U1's camera is switched on or off; nothing moves or heats.
+    std::thread([host, on]() {
+        wxString error;
+        static_cast<Moonraker *>(host.get())->camera_monitor(on, error);
+    }).detach();
 }
 
 void MoonrakerDevicePanel::apply_camera(const std::string &jpeg)
@@ -431,7 +472,7 @@ void MoonrakerDevicePanel::apply_camera(const std::string &jpeg)
         return;
     m_camera_image = image;
     m_camera_time  = wxDateTime::Now();
-    m_camera_note->SetLabel(wxString::Format(_L("Picture loaded at %s. The U1 takes a new one every few seconds while it prints."), m_camera_time.FormatTime()));
+    m_camera_note->SetLabel(wxString::Format(_L("Live from the U1's camera, about two pictures a second. Last picture at %s."), m_camera_time.FormatTime()));
     m_camera->Refresh();
 }
 

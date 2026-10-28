@@ -43,8 +43,14 @@ public:
     // Orca sends it: the uploaded gcode path relative to the gcodes root and the options JSON
     // (map_table, bed_level, flow_calibrate, time_lapse_camera). Blocks; call it off the UI thread.
     bool start_local_print(const std::string &path, const std::string &options, wxString &msg) const;
+    // Turns the Snapmaker U1's camera monitor on or off (camera.start_monitor / stop_monitor over
+    // Moonraker's websocket). While it is on, camera/monitor.jpg is close to live. Blocks.
+    bool camera_monitor(bool on, wxString &msg) const;
 
 private:
+    // Sends one JSON-RPC request over Moonraker's websocket and waits for its reply. Blocks.
+    bool websocket_call(const std::string &method, const std::string &params, int timeout_s, wxString &msg) const;
+
     std::string m_host;
     std::string m_apikey;
     std::string m_cafile;

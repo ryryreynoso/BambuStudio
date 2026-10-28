@@ -54,6 +54,8 @@ private:
     void     connect_to(const wxString &address);
     void     apply_host(const std::string &host);
     void     poll();
+    void     fetch_camera();
+    void     set_monitor(bool on);
     void     apply_status(const std::string &reply, const wxString &error);
     void     apply_camera(const std::string &jpeg);
     void     show_offline(const wxString &error);
@@ -65,6 +67,9 @@ private:
     std::shared_ptr<bool>      m_status_busy;
     std::shared_ptr<bool>      m_camera_busy;
     wxTimer                    m_timer;
+    wxTimer                    m_camera_timer;
+    bool                       m_monitor_on{false};
+    wxDateTime                 m_monitor_sent;
     std::string                m_web_url;
 
     Label       *m_name{nullptr};
