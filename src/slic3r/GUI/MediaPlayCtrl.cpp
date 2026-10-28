@@ -439,7 +439,7 @@ void MediaPlayCtrl::Play()
     std::string  agent_version = agent ? agent->get_version() : "";
     // 3D Print: use the printer's own LAN stream whenever the app knows its address and access code,
     // and go through the cloud only after LAN has just failed. Bambu's order (cloud first for a
-    // cloud-bound printer) gives "Connection Failed [1:40xx]" when the cloud stream is refused.
+    // cloud-bound printer) fails here, because the cloud refuses this app's stream (403).
     bool lan_ready = m_lan_proto > MachineObject::LVL_Disable && !m_lan_ip.empty() && !m_lan_passwd.empty();
     if (m_lan_proto > MachineObject::LVL_Disable && (m_lan_mode || !m_remote_proto || lan_ready) && !m_disable_lan && !m_lan_ip.empty()) {
         m_disable_lan = m_remote_proto && !m_lan_mode; // try remote next time
@@ -531,7 +531,12 @@ void MediaPlayCtrl::Play()
                             if (n != std::string::npos)
                                 m_failed_code = std::atoi(url.substr(n + 1, url.length() - n - 2).c_str());
                         }
-                        Stop(_L("Connection Failed. Please check the network and try again"), from_u8(url));
+                        // 3D Print: Bambu's cloud only streams to Bambu's own signed app, so when it refuses
+                        // and the printer's LAN stream is off, say which printer setting makes it work here.
+                        if (m_failed_code == 403 && m_lan_proto == MachineObject::LVL_Disable)
+                            Stop(_L("Bambu's cloud doesn't stream the camera to 3D Print. Turn on LAN Only Liveview on the printer's screen and the camera will play here directly."));
+                        else
+                            Stop(_L("Connection Failed. Please check the network and try again"), from_u8(url));
                     } else {
                         m_url = url;
                         if (m_media_ctrl) {
