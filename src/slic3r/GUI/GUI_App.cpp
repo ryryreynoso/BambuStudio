@@ -64,6 +64,9 @@
 #include <wx/dialog.h>
 #include <wx/textctrl.h>
 #include <wx/splash.h>
+#ifdef __APPLE__
+#include "SplashAnimationMac.hpp"
+#endif
 #include <wx/fontutil.h>
 #include <wx/glcanvas.h>
 
@@ -3370,6 +3373,13 @@ bool GUI_App::on_init_inner()
         p_ogl_manager->set_advanced_gcode_viewer_enabled(b_advanced_gcode_viewer_enabled);
     }
 
+#ifdef __APPLE__
+    // macOS: the animated splash in the app icon's design (Core Animation keeps it moving while
+    // the presets load). It fades out when on_init_inner returns.
+    std::unique_ptr<SplashAnimationMac> scrn = std::make_unique<SplashAnimationMac>(SLIC3R_APP_FULL_NAME,
+        into_u8(_L("V") + " " + GUI_App::format_display_version()));
+    scrn->set_text(into_u8(_L("Loading configuration") + dots));
+#else
     wxWeakRef<BBLSplashScreen> scrn;
 
     // BBS: ensure the splash screen is torn down on every exit path safely
@@ -3406,6 +3416,8 @@ bool GUI_App::on_init_inner()
         scrn->Refresh();
         scrn->Update();
     }
+
+#endif
 
     BOOST_LOG_TRIVIAL(info) << "loading systen presets...";
     preset_bundle = new PresetBundle();

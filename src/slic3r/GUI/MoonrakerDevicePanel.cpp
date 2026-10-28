@@ -7,11 +7,13 @@
 #include <wx/dcbuffer.h>
 #include <wx/mstream.h>
 #include <wx/sizer.h>
+#include <wx/textctrl.h>
 #include <wx/utils.h>
 
 #include <nlohmann/json.hpp>
 
 #include "GUI_App.hpp"
+#include "libslic3r/AppConfig.hpp"
 #include "I18N.hpp"
 #include "Widgets/Button.hpp"
 #include "Widgets/Label.hpp"
@@ -163,15 +165,21 @@ void MoonrakerDevicePanel::build()
 
     StateColor bg_white(std::pair<wxColour, int>(wxColour(206, 206, 206), StateColor::Pressed), std::pair<wxColour, int>(wxColour(238, 238, 238), StateColor::Hovered),
                         std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
+    m_address_edit = new wxTextCtrl(bar_panel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(FromDIP(170), -1), wxTE_PROCESS_ENTER);
+    m_address_edit->SetHint(_L("Printer address, e.g. 192.168.1.20"));
+    m_address_edit->SetToolTip(_L("The printer's IP address or host name. 3D Print remembers it."));
+    m_btn_connect = new Button(bar_panel, _L("Connect"));
     m_btn_refresh = new Button(bar_panel, _L("Refresh"));
     m_btn_web     = new Button(bar_panel, _L("Open web page"));
-    for (Button *btn : {m_btn_refresh, m_btn_web}) {
+    for (Button *btn : {m_btn_connect, m_btn_refresh, m_btn_web}) {
         btn->SetBackgroundColor(bg_white);
         btn->SetBorderColor(wxColour(38, 46, 48));
         btn->SetMinSize(wxSize(-1, FromDIP(28)));
         btn->SetCornerRadius(FromDIP(14));
     }
     m_btn_refresh->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { poll(); });
+    m_btn_connect->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { connect_to(m_address_edit->GetValue()); });
+    m_address_edit->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent &) { connect_to(m_address_edit->GetValue()); });
     m_btn_web->SetToolTip(_L("Open the printer's own web page (Fluidd) in your browser."));
     m_btn_web->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) {
         if (!m_web_url.empty())
@@ -179,9 +187,13 @@ void MoonrakerDevicePanel::build()
     });
 
     bar->Add(m_name, 0, wxALIGN_CENTER_VERTICAL);
+    // The address is shown (and edited) in the field on the right.
+    m_address->Hide();
     bar->Add(m_address, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(12));
     bar->Add(m_state, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(18));
     bar->AddStretchSpacer();
+    bar->Add(m_address_edit, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
+    bar->Add(m_btn_connect, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(18));
     bar->Add(m_btn_refresh, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(10));
     bar->Add(m_btn_web, 0, wxALIGN_CENTER_VERTICAL);
     auto *bar_outer = new wxBoxSizer(wxVERTICAL);
@@ -236,7 +248,7 @@ void MoonrakerDevicePanel::build()
     auto *progress_row = new wxBoxSizer(wxHORIZONTAL);
     m_job_progress = new ProgressBar(job_card, wxID_ANY, 100, wxDefaultPosition, wxSize(-1, FromDIP(8)));
     m_job_progress->SetHeight(FromDIP(8));
-    m_job_progress->SetProgressForedColour(COLOUR_OK);
+    m_job_progress->SetValue(0);
     m_job_percent = new Label(job_card, "0%");
     m_job_percent->SetFont(Label::Head_14);
     progress_row->Add(m_job_progress, 1, wxALIGN_CENTER_VERTICAL);
@@ -315,16 +327,44 @@ void MoonrakerDevicePanel::build()
     show_offline(wxEmptyString);
 }
 
+std::string MoonrakerDevicePanel::remembered_host()
+{
+    return wxGetApp().app_config ? wxGetApp().app_config->get("moonraker_host") : std::string();
+}
+
 void MoonrakerDevicePanel::set_printer(const std::string &name, const DynamicPrintConfig &config)
 {
-    const std::string host = config.has("print_host") ? config.opt_string("print_host") : std::string();
+    // The address set on the preset wins and is remembered; a preset without one (the Snapmaker
+    // system preset) uses the last address that worked, so the page survives a preset switch.
+    std::string host = config.has("print_host") ? config.opt_string("print_host") : std::string();
+    if (!host.empty() && wxGetApp().app_config)
+        wxGetApp().app_config->set("moonraker_host", host);
+    if (host.empty())
+        host = remembered_host();
     if (m_host && host == m_host_address && m_name->GetLabel() == wxString::FromUTF8(name))
         return;
-    m_host_address = host;
+    m_config.reset(new DynamicPrintConfig(config));
     m_name->SetLabel(wxString::FromUTF8(name));
-    m_address->SetLabel(wxString::FromUTF8(host));
+    apply_host(host);
+}
 
-    std::string web = config.has("print_host_webui") ? config.opt_string("print_host_webui") : std::string();
+void MoonrakerDevicePanel::connect_to(const wxString &address)
+{
+    std::string host = into_u8(address.Strip(wxString::both));
+    if (host.empty() || !m_config)
+        return;
+    if (wxGetApp().app_config)
+        wxGetApp().app_config->set("moonraker_host", host);
+    apply_host(host);
+}
+
+void MoonrakerDevicePanel::apply_host(const std::string &host)
+{
+    m_host_address = host;
+    m_address->SetLabel(wxString::FromUTF8(host));
+    m_address_edit->ChangeValue(wxString::FromUTF8(host));
+
+    std::string web = m_config->has("print_host_webui") ? m_config->opt_string("print_host_webui") : std::string();
     if (web.empty())
         web = host;
     if (!web.empty() && web.rfind("http", 0) != 0)
@@ -333,11 +373,12 @@ void MoonrakerDevicePanel::set_printer(const std::string &name, const DynamicPri
     m_btn_web->Enable(!web.empty());
 
     // A copy, so the poll threads never see the preset change under them.
-    DynamicPrintConfig copy(config);
+    DynamicPrintConfig copy(*m_config);
+    copy.set_key_value("print_host", new ConfigOptionString(host));
     m_host.reset(host.empty() ? nullptr : PrintHost::get_print_host(&copy));
     m_camera_image = wxImage();
     m_camera->Refresh();
-    show_offline(host.empty() ? _L("Add the printer's address with the Wi-Fi button next to the printer list.") : wxString());
+    show_offline(host.empty() ? _L("Type the printer's address at the top right and press Connect.") : wxString());
     Layout();
     if (IsShownOnScreen())
         poll();
@@ -535,6 +576,7 @@ void MoonrakerDevicePanel::apply_status(const std::string &reply, const wxString
 
 void MoonrakerDevicePanel::msw_rescale()
 {
+    m_btn_connect->Rescale();
     m_btn_refresh->Rescale();
     m_btn_web->Rescale();
     m_job_progress->Rescale();

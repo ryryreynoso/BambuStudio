@@ -188,6 +188,7 @@
 #include "PhysicalPrinterDialog.hpp"
 #include "PrintHostDialogs.hpp"
 #include "MoonrakerSendDialog.hpp"
+#include "MoonrakerDevicePanel.hpp"
 #include "PlateSettingsDialog.hpp"
 #include "PlateMoveDialog.hpp"
 #include "DailyTips.hpp"
@@ -24830,6 +24831,16 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     DynamicPrintConfig* physical_printer_config = &Slic3r::GUI::wxGetApp().preset_bundle->printers.get_edited_preset().config;
     if (! physical_printer_config || p->model.objects.empty())
         return;
+    // Moonraker presets without an address (the Snapmaker system preset) use the one remembered from
+    // the Device page.
+    DynamicPrintConfig moonraker_config;
+    if (const auto *type = physical_printer_config->option<ConfigOptionEnum<PrintHostType>>("host_type");
+        type && type->value == htMoonraker && physical_printer_config->opt_string("print_host").empty() &&
+        !MoonrakerDevicePanel::remembered_host().empty()) {
+        moonraker_config = *physical_printer_config;
+        moonraker_config.set_key_value("print_host", new ConfigOptionString(MoonrakerDevicePanel::remembered_host()));
+        physical_printer_config = &moonraker_config;
+    }
 
     PrintHostJob upload_job(physical_printer_config);
     if (upload_job.empty())

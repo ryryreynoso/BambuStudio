@@ -759,6 +759,8 @@ if (APPLE)
             GUI/wxMediaCtrl2.h
             GUI/wxMediaCtrl3.h
             GUI/WindowShadowMac.mm
+            GUI/SplashAnimationMac.mm
+            GUI/SplashAnimationMac.hpp
         )
     FIND_LIBRARY(DISKARBITRATION_LIBRARY DiskArbitration)
 else ()

@@ -11,6 +11,7 @@
 #include <wx/timer.h>
 
 class wxBoxSizer;
+class wxTextCtrl;
 class Button;
 class Label;
 class ProgressBar;
@@ -35,6 +36,8 @@ public:
     // Points the page at a printer preset; does nothing when name and host are unchanged.
     void set_printer(const std::string &name, const DynamicPrintConfig &config);
     void msw_rescale();
+    // The last Moonraker address that was set or typed, for presets that carry none.
+    static std::string remembered_host();
 
 private:
     struct ToolRow
@@ -48,11 +51,14 @@ private:
 
     wxPanel *make_card(wxWindow *parent, const wxString &title, wxBoxSizer *&body);
     void     build();
+    void     connect_to(const wxString &address);
+    void     apply_host(const std::string &host);
     void     poll();
     void     apply_status(const std::string &reply, const wxString &error);
     void     apply_camera(const std::string &jpeg);
     void     show_offline(const wxString &error);
 
+    std::unique_ptr<DynamicPrintConfig> m_config;
     std::shared_ptr<PrintHost> m_host;
     std::string                m_host_address;
     std::shared_ptr<bool>      m_alive;
@@ -64,6 +70,8 @@ private:
     Label       *m_name{nullptr};
     Label       *m_address{nullptr};
     Label       *m_state{nullptr};
+    wxTextCtrl  *m_address_edit{nullptr};
+    Button      *m_btn_connect{nullptr};
     Button      *m_btn_refresh{nullptr};
     Button      *m_btn_web{nullptr};
 
