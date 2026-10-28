@@ -97,6 +97,29 @@ bool Moonraker::test(wxString &msg) const
     return !find_base_url(msg).empty();
 }
 
+std::string Moonraker::query_objects(const std::vector<std::string> &objects, wxString &msg) const
+{
+    const std::string base = find_base_url(msg);
+    if (base.empty())
+        return {};
+    std::string url = base + "printer/objects/query";
+    for (size_t i = 0; i < objects.size(); ++i)
+        url += (i == 0 ? "?" : "&") + Http::url_encode(objects[i]);
+
+    std::string status;
+    auto        http = Http::get(std::move(url));
+    set_auth(http);
+    http.on_error([&](std::string body, std::string error, unsigned status_code) {
+            msg = format_error(body, error, status_code);
+        })
+        .on_complete([&](std::string body, unsigned) { status = std::move(body); })
+#ifdef WIN32
+        .ssl_revoke_best_effort(m_ssl_revoke_best_effort)
+#endif
+        .perform_sync();
+    return status;
+}
+
 wxString Moonraker::get_test_ok_msg() const
 {
     return _L("Connection to Moonraker works correctly.");

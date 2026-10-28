@@ -32,6 +32,11 @@ public:
     PrintHostPostUploadActions get_post_upload_actions() const override { return PrintHostPostUploadAction::StartPrint; }
     std::string get_host() const override { return m_host; }
 
+    // Reads printer/objects/query for the given Klipper objects (GET only). Returns Moonraker's
+    // reply body ({"result": {"status": {...}}}), or an empty string with msg set. Blocks; call it
+    // off the UI thread.
+    std::string query_objects(const std::vector<std::string> &objects, wxString &msg) const;
+
 private:
     std::string m_host;
     std::string m_apikey;

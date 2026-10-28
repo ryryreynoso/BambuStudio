@@ -187,6 +187,7 @@
 
 #include "PhysicalPrinterDialog.hpp"
 #include "PrintHostDialogs.hpp"
+#include "MoonrakerSendDialog.hpp"
 #include "PlateSettingsDialog.hpp"
 #include "PlateMoveDialog.hpp"
 #include "DailyTips.hpp"
@@ -24853,24 +24854,37 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     }
     default_output_file = fs::path(Slic3r::fold_utf8_to_ascii(default_output_file.string()));
 
-    // Repetier specific: Query the server for the list of file groups.
-    wxArrayString groups;
-    {
-        wxBusyCursor wait;
-        upload_job.printhost->get_groups(groups);
-    }
+    PrintHostPostUploadAction post_action = PrintHostPostUploadAction::None;
+    const auto *host_type = physical_printer_config->option<ConfigOptionEnum<PrintHostType>>("host_type");
+    if (host_type && host_type->value == htMoonraker) {
+        // Moonraker printers (Snapmaker U1) get a Bambu-style send dialog with the toolhead filaments.
+        MoonrakerSendDialog dlg(this, physical_printer_config, wxGetApp().preset_bundle->printers.get_edited_preset().name,
+                                wxString(default_output_file.stem().wstring()));
+        if (dlg.ShowModal() != wxID_OK)
+            return;
+        upload_job.upload_data.upload_path = into_path(dlg.filename());
+        upload_job.upload_data.post_action = post_action = dlg.post_action();
+    } else {
+        // Repetier specific: Query the server for the list of file groups.
+        wxArrayString groups;
+        {
+            wxBusyCursor wait;
+            upload_job.printhost->get_groups(groups);
+        }
 
-    PrintHostSendDialog dlg(default_output_file, upload_job.printhost->get_post_upload_actions(), groups);
-    if (dlg.ShowModal() == wxID_OK) {
+        PrintHostSendDialog dlg(default_output_file, upload_job.printhost->get_post_upload_actions(), groups);
+        if (dlg.ShowModal() != wxID_OK)
+            return;
         upload_job.upload_data.upload_path = dlg.filename();
-        upload_job.upload_data.post_action = dlg.post_action();
+        upload_job.upload_data.post_action = post_action = dlg.post_action();
         upload_job.upload_data.group       = dlg.group();
-
+    }
+    {
         p->export_gcode(fs::path(), false, std::move(upload_job));
 
         try {
             json          j;
-            switch (dlg.post_action()) {
+            switch (post_action) {
             case PrintHostPostUploadAction::None:
                 j["post_action"] = "Upload";
                 break;
