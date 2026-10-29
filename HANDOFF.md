@@ -1,118 +1,167 @@
-# Handoff: Bambu Studio + Full Spectrum + Snapmaker U1 (moving to a Mac)
+# Handoff: 3D Print (Bambu Studio fork with Snapmaker U1 support)
 
 Branch `feature/full-spectrum` in `ryryreynoso/BambuStudio`, based on upstream Bambu Studio
-commit `79df7ae`. This file says what is on the branch, what is verified, how to build and test it
-on an Apple Silicon Mac, and what is left.
+commit `79df7ae`. The macOS app is called **3D Print** (bundle id `com.ryryreynoso.3dprint`). It
+drives a Bambu Lab P2S ("Bamboozle") and a Snapmaker U1 from one app. This file covers what is on
+the branch, what has been checked on the real printers, how to build and install it, and what is
+left. Updated 2026-10-29.
 
-## 1. What you need
+## 1. The printers
 
-| Item | Where |
-|---|---|
-| The code | `bambu-studio-fs-u1-<N>commits.bundle` (sent in chat), or the pushed branch once it is on GitHub |
-| macOS on Apple Silicon, ~40 GB free disk | Dependencies alone are large |
-| Xcode 16 (with command-line tools) | App Store; then `xcode-select --install` |
-| Homebrew | https://brew.sh |
-| Build tools | `brew install cmake ninja git gettext libtool automake autoconf texinfo pkgconf` |
-| XcodeGen (iPhone app only) | `brew install xcodegen` |
-| Snapmaker Orca (for Snapmaker sign-in) | Installs the `snapmaker_control_macos_arm64` helper this branch uses |
-| Your printers on the same Wi-Fi | U1 IP address; P2S IP, serial number and access code (LAN mode + developer mode) |
-| Claude Code on the Mac (optional) | Desktop app or `claude` CLI, opened in the repository folder |
+| Printer | Address | How 3D Print talks to it |
+|---|---|---|
+| Bambu Lab P2S "Bamboozle" | 10.0.1.16, serial `22E8AJ650501456` | Bambu's network plugin (cloud + LAN). Ports 990, 6000, 8883 open; 322 (RTSPS liveview) closed. |
+| Snapmaker U1 | 10.0.1.4 | Moonraker: HTTP on port 80, websocket at `/websocket`. No API key set. |
 
-## 2. Get the code onto the Mac
+## 2. Build and install (Apple Silicon Mac, as used 2026-10-29)
 
-Bundle in `~/Downloads`:
-
-```sh
-git clone https://github.com/ryryreynoso/BambuStudio.git ~/BambuStudio
-cd ~/BambuStudio
-git fetch https://github.com/bambulab/BambuStudio.git master        # supplies base commit 79df7ae
-git bundle verify ~/Downloads/bambu-studio-fs-u1-*commits.bundle
-git fetch ~/Downloads/bambu-studio-fs-u1-*commits.bundle feature/full-spectrum:feature/full-spectrum
-git checkout feature/full-spectrum
-git log -1 --oneline                                                  # matches the tip given in chat
-git push -u origin feature/full-spectrum                              # your own GitHub login; never to master
-```
-
-Pushing starts two GitHub Actions workflows on the fork: **Build Full Spectrum** (macOS arm64 and
-Windows) and **iPhone companion app**.
-
-## 3. Build the desktop app (Apple Silicon)
+First time only: `./BuildMac.sh -d -a arm64 -x` (dependencies), then `./BuildMac.sh -s -a arm64 -x`.
+After that, rebuild just the app and copy it into the installed bundle:
 
 ```sh
 cd ~/BambuStudio
-./BuildMac.sh -d -a arm64 -x      # dependencies, once (long)
-./BuildMac.sh -s -a arm64 -x      # the app
+CMAKE_POLICY_VERSION_MINIMUM=3.5 cmake --build build/arm64 --target BambuStudio
+osascript -e 'tell application id "com.ryryreynoso.3dprint" to quit'
+cp build/arm64/src/BambuStudio.app/Contents/MacOS/BambuStudio "build/arm64/BambuStudio/3D Print.app/Contents/MacOS/"
+codesign --force --deep -s - "build/arm64/BambuStudio/3D Print.app"
+open -b com.ryryreynoso.3dprint
 ```
 
-The app lands under `build/arm64/BambuStudio/BambuStudio.app` (the script prints the path). For
-the unit tests, configure with `-DSLIC3R_BUILD_TESTS=ON` and build the `full_spectrum_tests`
-target. The Linux session also patched `deps/` locally to mirror blocked GitHub downloads; that
-patch is not on the branch and is not needed on a Mac.
+A change to `MainFrame.hpp` recompiles most of the GUI (10+ minutes); other files take about a
+minute.
 
-## 4. Build the iPhone app
+**After every install, macOS asks again for access to Documents/Downloads.** The app waits at
+start-up (in `MainFrame::FileHistory::LoadThumbnails`) until someone clicks **Allow**. Each ad-hoc
+signature counts as a new app. A stable self-signed signing certificate in the login keychain
+would stop this, but it hasn't been set up because it adds a keychain item.
 
-```sh
-cd ~/BambuStudio/ios/PrinterCompanion
-xcodegen generate
-open PrinterCompanion.xcodeproj    # pick your team under Signing & Capabilities, run on the iPhone
-```
+Unit tests: configure with `-DSLIC3R_BUILD_TESTS=ON` and build `full_spectrum_tests`.
 
-It has never been compiled: Swift was not available in the cloud session. Expect a few compile
-errors on the first build; fix them there.
+## 3. What the branch adds
 
-## 5. What the branch adds
-
-**Full Spectrum color mixing**, built on Bambu's own mixed filaments (`docs/full-spectrum/PORT_PLAN.md`):
-* Cycle mode (`filament_mixed_pattern`) and the minimum sub-layer height.
-* Multi-filament gradients and the sub-layer infill toggle (`mixed_color_sublayer_infill`).
-* Full Spectrum 3MF project import, plus the "add 50/50 pairs" helper.
-* Dialog extras: Full Spectrum's spectral color estimate, filament-change, time and purge
-  estimates, and a cost warning.
+**Full Spectrum color mixing** on Bambu's mixed filaments: cycle mode, minimum sub-layer height,
+gradients, sub-layer infill toggle, Full Spectrum 3MF import, and estimates in the dialog. See
+`docs/full-spectrum/PORT_PLAN.md`.
 
 **Snapmaker U1** (`docs/snapmaker-u1/README.md`):
-* U1 profiles, and the OrcaSlicer macro language selected per printer
-  (`gcode_macro_language = "orca"`).
-* Support for more than two extruders, with a test that each tool prints its own object.
-* Idle-tool standby with preheat before the next use.
-* Network printing through a Moonraker print host.
-* **File → Snapmaker Account and Devices…** through Snapmaker's own helper.
+* Profiles and the OrcaSlicer macro language.
+* More than two extruders, where filament *k* prints on tool *k*.
+* Idle-tool standby and preheat.
+* Moonraker print host, and File → Snapmaker Account and Devices… through Snapmaker's own helper.
 
-**iPhone companion app** (`ios/PrinterCompanion/README.md`): read-only status for the U1
-(Moonraker) and Bambu printers over LAN.
+**3D Print app shell:** the name, app icon, Dock icon and animated macOS splash.
 
-Bambu Lab printers, accounts, MakerWorld, AMS, painting and 3MF are left as they are. The
-regression check (X1 Carbon) gives the same G-code as unmodified Bambu Studio.
+**Device tab: both printers in one place**
+* **Printers bar** at the top (`DeviceSwitchBar`): one button per printer with its live state
+  ("Bamboozle · Printing 45%", "Snapmaker U1 · Ready"). A click opens that printer's page, whatever
+  preset is selected for slicing. The bar appears once a U1 address has been used.
+* **Bambu page:** Bambu's own Monitor page, unchanged apart from the camera fallback (§4).
+* **U1 page** (`MoonrakerDevicePanel`):
+  * Camera at about 2 pictures a second.
+  * Print job card with the slicer thumbnail, progress, layer, elapsed and remaining time, finish
+    time and speed factor.
+  * Pause, Resume and Stop, each behind a confirmation.
+  * Bed and chamber temperatures.
+  * Four toolheads: filament colour, vendor, type, temperature and which one is in use.
+  * Snapmaker's error list.
+  * A notice when a print ends.
+  * Polled every 3 s while shown, every 15 s while hidden.
 
-## 6. Verified so far (Linux build, 2026-10-27)
+**Sending prints**
+* **Bambu:** Bambu's own send dialog, with AMS mapping. Currently refused, see §4.
+* **U1:** a Bambu-style send dialog with the toolhead picker. After the upload, the app sends
+  `server.files.start_local_print`, waits until `print_stats` shows the job printing, then switches
+  to the Device tab.
+* The slicing result's two-nozzle "Filament Grouping" box now shows only for two-nozzle Bambu
+  printers. On the U1 the matching happens in the send dialog, as in Snapmaker Orca.
 
-* `full_spectrum_tests`: 87 test cases, 26,339 assertions pass.
-* `scripts/full_spectrum/slice_check.py` checks:
-  * `cycle`, `sublayer`: pass.
-  * `regress`: matches the unmodified build.
-  * `u1`: pass. 226 tool changes, each cube on its own tool; 225 standby commands and 225
-    correctly ordered preheats.
-* The Moonraker host passes against `scripts/snapmaker/mock_moonraker.py`.
-* The Snapmaker sign-in code passes against `scripts/snapmaker/fake_snapmaker_helper.py`.
+**iPhone companion app** (`ios/PrinterCompanion`): read-only status for both printers.
+`PrinterCompanion.xcodeproj` and `Resources/Info.plist` are generated by `xcodegen` and are left
+untracked.
 
-## 7. Not verified yet — do these on the Mac
+## 4. Bambu restrictions (not bugs in 3D Print)
 
-1. The Mac app builds and opens. Click through:
-   * the mixed-filament dialog (cycle row, spectral estimate, cost warning);
-   * the Quality tab sub-layer options.
-2. **Snapmaker sign-in** with the real helper: File → Snapmaker Account and Devices…, sign in,
-   check that the Devices page lists the U1.
-3. **U1 printing**: connection button → host type Moonraker → U1 IP → Test, then Print → Send →
-   Upload. Watch the first print from start to finish: start sequence, tool changes, standby and
-   preheat temperatures.
-4. **P2S**: slice and print a normal job through Bambu's own flow, to confirm nothing changed.
-5. **Color mixing**: a physical test print. No color accuracy is claimed until then.
-6. iPhone app: build, add the U1 and the P2S, check that status and temperatures update.
+Bambu's network plugin checks that the app calling it is Bambu's own signed Bambu Studio:
 
-## 8. Not done
+* **Printing from 3D Print to the P2S is refused**: "Your software is not signed, and some
+  printing functions have been restricted." It is `BAMBU_NETWORK_SIGNED_ERROR` in `PrintJob`.
+* **Cloud liveview is refused** with `[403] forbidden`. The official Bambu Studio streams the same
+  printer fine with the same account.
+* LAN liveview is off on the printer (port 322 closed). 3D Print therefore shows the printer's
+  preview picture, refreshed every 3 s, and says to turn on **LAN Only Liveview** on the printer
+  for smooth video.
 
-* Full Spectrum per-wall color groups and surface bias are not ported; imported projects
-  approximate them and say so (`PORT_PLAN.md` §4).
-* U1 prime tower is off: Bambu's tower is not verified on a toolchanger.
+Don't get around these by faking Bambu's signature or patching the plugin. The legitimate routes
+are in §7.
+
+## 5. Checked on the real printers
+
+| What | Result |
+|---|---|
+| U1 camera | `camera.start_monitor` over the websocket. The U1 confirms with a `notify_camera_status_change` push. `monitor.jpg` changes about every 0.5 s. Shown live in the app; recovers on its own. |
+| U1 status, toolheads, errors, thumbnail | Shown in the app from real replies. Thumbnails come from `server/files/metadata` and `gcodes/.thumbs/…png`. |
+| Printers bar | Both states live; switching between both pages works (dark mode). |
+| Bambu camera fallback | Picture refreshes every 3 s (timestamps checked). |
+| Bambu Monitor page | Shows the P2S, AMS slots, temperatures and the finished job. |
+| Crash on a failed Bambu send | Was an `EXC_BREAKPOINT`: the error display resized the dialog off the main thread. Fixed in `Jobs/Job.cpp`. Afterwards the app showed the signing message instead of quitting. |
+
+**Built but not tested on hardware:**
+* U1 Pause, Resume and Stop.
+* The U1 check that a sent job really started.
+* The print-finished notice.
+* Camera recovery after a real network drop.
+* The slicing-result legend with the U1 selected. The code is changed but hasn't been looked at
+  on screen.
+
+**Not tested since the move to the Mac:** Snapmaker sign-in with the real helper, a full U1 print
+from 3D Print, and color mixing on a physical print.
+
+## 6. Gotchas
+
+* **Logs are AES-encrypted** (Bambu's logger). For debugging, write temporary `fprintf` lines to
+  a file and remove them afterwards. Crash reports are in `~/Library/Logs/DiagnosticReports/BambuStudio-*.ips`.
+* **Shared plugin folder.** The official Bambu Studio and 3D Print share
+  `~/Library/Application Support/BambuStudio/plugins` and replace each other's network plugin
+  (02.08.02.60 vs 02.08.04.60). This is not fixed yet.
+* **wx timers on one panel** need their own ids (`wxWindow::NewControlId()`). With `wxID_ANY`,
+  each timer runs the other's handler.
+* **Dark mode recolours colours.** `StateColor` swaps known light colours for dark ones (the map is
+  in `Widgets/StateColor.cpp`). Pick colours outside that map when a widget must look the same in
+  both themes.
+* **U1 quirks:**
+  * `camera.stop_monitor` is ignored; the monitor lapses about 5 minutes after the last start.
+  * Thumbnail metadata reports width 50 for both the 96×96 and the 50×50 picture.
+  * The U1's gcode files carry no `estimated_time`.
+
+## 7. Next steps (suggested order)
+
+1. **Print to the P2S from 3D Print.** Two legitimate options:
+   * **"Print with Bambu Studio" button** (quick): export the plate's `.gcode.3mf` and open it in
+     the official Bambu Studio, where Print works normally. Nothing changes on the printer.
+   * **LAN Only + Developer Mode** (bigger): Bambu's supported mode for third-party apps. Upload
+     over FTPS on port 990 and start with the MQTT `project_file` command, using the access code.
+     Verify TLS against `resources/cert/printer.cer`. This turns off Bambu's cloud and Handy for
+     the printer. Test the print start with someone watching it.
+2. A watched U1 print sent from 3D Print. Check the start check, pause, resume and stop, and the
+   finish notice.
+3. Look at the U1 slicing-result legend on screen.
+4. A stable signing certificate, so the macOS access prompt stops coming back (needs the owner's
+   OK).
+5. Separate the plugin folders of 3D Print and the official Bambu Studio.
+
+## 8. Key files
+
+| Area | Files |
+|---|---|
+| U1 client (HTTP, websocket, camera, start check) | `src/slic3r/Utils/Moonraker.cpp/.hpp` |
+| U1 Device page | `src/slic3r/GUI/MoonrakerDevicePanel.cpp/.hpp` |
+| U1 send dialog | `src/slic3r/GUI/MoonrakerSendDialog.cpp/.hpp`, `Plater::send_gcode_legacy` |
+| Printers bar, Device tab switching | `src/slic3r/GUI/DeviceSwitchBar.cpp/.hpp`, `MainFrame::show_device / show_device_page / prepare_u1_page` |
+| Bambu camera fallback | `src/slic3r/GUI/MediaPlayCtrl.cpp` |
+| Filament Grouping box | `src/slic3r/GUI/GCodeRenderer/BaseRenderer.cpp` (`m_nozzle_nums == 2`) |
+| Job error display (crash fix) | `src/slic3r/GUI/Jobs/Job.cpp` |
+| Splash | `src/slic3r/GUI/SplashAnimationMac.mm/.hpp` |
+| U1 protocol notes | `docs/snapmaker-u1/README.md` |
 
 ## 9. Ground rules carried over
 
@@ -120,18 +169,18 @@ regression check (X1 Carbon) gives the same G-code as unmodified Bambu Studio.
 * Respect AGPL-3.0: code adapted from Snapmaker Orca and Full Spectrum keeps its attribution.
 * Snapmaker's helper is used from the user's own Snapmaker Orca install, never redistributed.
 * No hard-coded tokens and no plaintext credentials. TLS stays verified.
-* No new motion or heater commands without testing them.
+* No new motion or heater commands without testing them. Pause, resume and stop on the U1 are
+  still untested (§5).
+* Don't bypass Bambu's app-signature checks (§4).
+* Commits end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
-## 10. Prompt for a new Claude Code session on the Mac
+## 10. Prompt for the next session
 
 > I'm continuing work on branch feature/full-spectrum of ryryreynoso/BambuStudio in
-> ~/BambuStudio. Read HANDOFF.md, docs/full-spectrum/PORT_PLAN.md and
-> docs/snapmaker-u1/README.md first.
+> ~/BambuStudio (the macOS app "3D Print"). Read HANDOFF.md first, then
+> docs/snapmaker-u1/README.md.
 >
-> Then:
-> 1. Build the Apple Silicon app with BuildMac.sh and the unit tests (full_spectrum_tests).
-> 2. Build the iPhone app in ios/PrinterCompanion with XcodeGen and fix any compile errors.
-> 3. Help me run the "Not verified yet" checklist in HANDOFF.md §7 against my Snapmaker U1, my
->    Bambu P2S and my Snapmaker account.
->
-> Follow the ground rules in §9. Commit fixes to feature/full-spectrum and push only that branch.
+> Next: add a "Print with Bambu Studio" option to the Bambu send dialog (HANDOFF §7.1), since
+> Bambu's plugin refuses prints from unsigned apps. Then help me run a watched U1 print from
+> 3D Print to check the start check and pause/resume/stop. Follow the ground rules in §9. Build
+> and install as in §2. Commit to feature/full-spectrum and push only that branch.

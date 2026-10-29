@@ -77,9 +77,10 @@ Earlier results (2026-10-26):
   temperatures, tool usage), not line by line against Snapmaker's output.
 * **Not printed.** Nothing has been run on a physical U1. Check the first jobs on the printer
   before relying on them.
-* **Moonraker host tested only against a mock.** It has not reached a real U1. Snapmaker printers
-  may require authorization that the mock does not; the host sends `printhost_apikey` as
-  `X-Api-Key` when one is entered.
+* **Moonraker host checked on a real U1 for reading only.** Status, camera, thumbnails and
+  the websocket camera command work against the user's U1 (2026-10-28/29). Upload, start,
+  pause, resume and stop have not been run from 3D Print yet. The host sends `printhost_apikey`
+  as `X-Api-Key` when one is entered; this U1 needs none.
 * **Preheat timing is estimated.** The 30 s lead uses Bambu's print-time estimate. If the estimate
   is optimistic, the tool change waits longer for `M109`; it never prints cold. Snapmaker's
   per-filament `idle_temperature` is not read; the standby temperature comes from
