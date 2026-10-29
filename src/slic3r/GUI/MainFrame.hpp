@@ -371,6 +371,10 @@ public:
     void RunScript(wxString js);
     void RunScriptLeft(wxString js);
     void show_device(bool bBBLPrinter);
+    // Shows the Bambu monitor or the Snapmaker U1 page in the Device tab, whatever preset is selected.
+    void show_device_page(bool u1);
+    void set_device_page(wxWindow *page);
+    void prepare_u1_page(); // points the U1 page at the U1 preset (or the remembered address)
 
     // OrcaSlicer calibration
     PA_Calibration_Dlg *         m_pa_calib_dlg{nullptr};

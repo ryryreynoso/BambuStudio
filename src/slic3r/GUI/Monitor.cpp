@@ -1,4 +1,5 @@
 #include "Tab.hpp"
+#include "DeviceSwitchBar.hpp"
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Model.hpp"
 
@@ -112,7 +113,11 @@ MonitorPanel::MonitorPanel(wxWindow* parent, wxWindowID id, const wxPoint& pos, 
 
     m_main_sizer = new wxBoxSizer(wxHORIZONTAL);
     m_main_sizer->Add(m_tabpanel, 1, wxEXPAND | wxLEFT, 0);
-    SetSizerAndFit(m_main_sizer);
+    // 3D Print: switch between this page and the Snapmaker U1's.
+    auto *outer = new wxBoxSizer(wxVERTICAL);
+    outer->Add(new DeviceSwitchBar(this, false), 0, wxEXPAND);
+    outer->Add(m_main_sizer, 1, wxEXPAND);
+    SetSizerAndFit(outer);
 
     init_timer();
 

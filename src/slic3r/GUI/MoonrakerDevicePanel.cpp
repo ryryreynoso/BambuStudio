@@ -16,6 +16,7 @@
 #include <boost/log/trivial.hpp>
 #include <nlohmann/json.hpp>
 
+#include "DeviceSwitchBar.hpp"
 #include "GUI_App.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "I18N.hpp"
@@ -52,8 +53,8 @@ const int MONITOR_RENEW_S = 60;
 // monitor lapsed or the camera stalled, and it is asked for again (at most every ASK_AGAIN_S).
 const int CAMERA_STALE_S = 6;
 const int ASK_AGAIN_S    = 10;
-// While the page is hidden the status is still read, this many status ticks apart, so a finished
-// print can be announced.
+// While the page is hidden the status is still read, this many status ticks apart, for the
+// printer switch bar and so a finished print can be announced.
 const int HIDDEN_POLL_TICKS = 5;
 const int THUMB_SIZE        = 96;
 
@@ -148,7 +149,8 @@ MoonrakerDevicePanel::MoonrakerDevicePanel(wxWindow *parent)
         static int hidden_ticks = 0;
         if (IsShownOnScreen())
             poll();
-        else if (m_last_job_state == "printing" || m_last_job_state == "paused") {
+        else {
+            // Slowly, for the switch bar and the print-finished notice.
             if (++hidden_ticks >= HIDDEN_POLL_TICKS) {
                 hidden_ticks = 0;
                 poll();
@@ -213,6 +215,7 @@ wxPanel *MoonrakerDevicePanel::make_card(wxWindow *parent, const wxString &title
 void MoonrakerDevicePanel::build()
 {
     auto *page = new wxBoxSizer(wxVERTICAL);
+    page->Add(new DeviceSwitchBar(this, true), 0, wxEXPAND | wxBOTTOM, FromDIP(1));
 
     // Printer bar.
     auto *bar_panel = new wxPanel(this);
@@ -718,6 +721,7 @@ void MoonrakerDevicePanel::show_offline(const wxString &error)
             show_camera_problem(_L("The printer is not answering. The picture is from") + " " + m_camera_time.FormatTime() + ".");
     }
     m_state->SetLabel(error.empty() ? (m_host ? _L("Connecting...") : wxString()) : _L("Offline"));
+    m_summary = error.empty() ? (m_host ? _L("Connecting...") : _L("Not connected")) : _L("Offline");
     m_state->SetForegroundColour(error.empty() ? COLOUR_MUTED : COLOUR_ERROR);
     m_state->SetToolTip(error);
     if (!error.empty()) {
@@ -787,6 +791,7 @@ void MoonrakerDevicePanel::apply_status(const std::string &reply, const wxString
     m_btn_pause->Enable(klippy == "ready" && job == "printing");
     m_btn_resume->Enable(klippy == "ready" && job == "paused");
     m_btn_cancel->Enable(klippy == "ready" && active);
+    m_summary = active ? wxString::Format("%s %d%%", job == "paused" ? _L("Paused") : _L("Printing"), (int) std::lround(progress * 100.)) : state_text;
     static const std::map<std::string, wxString> job_names{{"standby", _L("Idle")},       {"printing", _L("Printing")}, {"paused", _L("Paused")},
                                                            {"complete", _L("Finished")}, {"cancelled", _L("Cancelled")}, {"error", _L("Stopped with an error")}};
     auto       named = job_names.find(job);

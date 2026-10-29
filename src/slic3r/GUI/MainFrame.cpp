@@ -1539,6 +1539,9 @@ void MainFrame::init_tabpanel()
     // Moonraker printers (Snapmaker U1) get a native device page instead of the printer's web UI.
     m_moonraker_device = new MoonrakerDevicePanel(m_tabpanel);
     m_moonraker_device->Hide();
+    // Connected from the start, so the Bambu page's switch bar can show the U1's state.
+    if (!MoonrakerDevicePanel::remembered_host().empty())
+        CallAfter([this]() { if (m_moonraker_device && !m_moonraker_device->IsShown()) prepare_u1_page(); });
 
     if (wxGetApp().is_enable_multi_machine()) {
         m_multi_machine = new MultiMachinePage(m_tabpanel, wxID_ANY, wxDefaultPosition, wxDefaultSize);
@@ -1577,13 +1580,8 @@ void MainFrame::init_tabpanel()
 
 // OrcaSlicer
 void MainFrame::show_device(bool bBBLPrinter) {
-  wxWindow *current = m_tabpanel->GetPage(tpMonitor);
-  if (current != m_monitor && current != m_printer_view && current != m_moonraker_device) {
-    BOOST_LOG_TRIVIAL(error) << "Failed to find device tab";
-    return;
-  }
   // Bambu printers: Bambu's monitor. Moonraker printers (Snapmaker U1): the native device page.
-  // Other printers: their web UI.
+  // Other printers: their web UI. The switch bar on the page can show the other printer.
   wxWindow *page = m_monitor;
   if (!bBBLPrinter) {
     page = m_printer_view;
@@ -1593,6 +1591,46 @@ void MainFrame::show_device(bool bBBLPrinter) {
         page = m_moonraker_device;
         m_moonraker_device->set_printer(preset.name, preset.config);
     }
+  }
+  set_device_page(page);
+}
+
+void MainFrame::show_device_page(bool u1)
+{
+  if (u1)
+    prepare_u1_page();
+  set_device_page(u1 ? (wxWindow *) m_moonraker_device : m_monitor);
+}
+
+void MainFrame::prepare_u1_page()
+{
+  // The selected preset when it is a Moonraker printer, else the user's own U1 preset, else the
+  // selected preset's settings pointed at Moonraker (the page uses the address it remembers).
+  PresetCollection &printers = wxGetApp().preset_bundle->printers;
+  auto is_moonraker = [](const Preset &p) {
+    const auto *type = p.config.option<ConfigOptionEnum<PrintHostType>>("host_type");
+    return type && type->value == htMoonraker;
+  };
+  const Preset *chosen = is_moonraker(printers.get_edited_preset()) ? &printers.get_edited_preset() : nullptr;
+  for (const Preset &p : printers.get_presets())
+    if (!chosen && p.is_visible && !p.is_default && is_moonraker(p))
+      chosen = &p;
+  if (chosen) {
+    m_moonraker_device->set_printer(chosen->name, chosen->config);
+  } else {
+    DynamicPrintConfig config = printers.get_edited_preset().config;
+    config.set_key_value("host_type", new ConfigOptionEnum<PrintHostType>(htMoonraker));
+    config.set_key_value("print_host", new ConfigOptionString(""));
+    m_moonraker_device->set_printer("Snapmaker U1", config);
+  }
+}
+
+void MainFrame::set_device_page(wxWindow *page)
+{
+  wxWindow *current = m_tabpanel->GetPage(tpMonitor);
+  if (current != m_monitor && current != m_printer_view && current != m_moonraker_device) {
+    BOOST_LOG_TRIVIAL(error) << "Failed to find device tab";
+    return;
   }
   if (current != page) {
     const bool selected = m_tabpanel->GetSelection() == tpMonitor;

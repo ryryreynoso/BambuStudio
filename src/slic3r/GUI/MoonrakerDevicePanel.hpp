@@ -41,6 +41,8 @@ public:
     void msw_rescale();
     // The last Moonraker address that was set or typed, for presets that carry none.
     static std::string remembered_host();
+    // One line for the printer switch bar, e.g. "Printing 45%" or "Offline".
+    wxString summary() const { return m_summary; }
 
 private:
     struct ToolRow
@@ -95,6 +97,7 @@ private:
     size_t       m_camera_hash{0};
     wxString     m_camera_problem; // shown over the picture; empty when it is live
     bool         m_online{false};
+    wxString     m_summary;
 
     wxStaticBitmap *m_job_thumb{nullptr};
     std::string     m_thumb_file; // the print file the thumbnail is for
