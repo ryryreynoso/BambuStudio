@@ -1589,6 +1589,8 @@ void MainFrame::show_device(bool bBBLPrinter) {
     const auto *host_type = preset.config.option<ConfigOptionEnum<PrintHostType>>("host_type");
     if (host_type && host_type->value == htMoonraker) {
         page = m_moonraker_device;
+        if (wxGetApp().app_config)
+            wxGetApp().app_config->set("moonraker_preset", preset.name);
         m_moonraker_device->set_printer(preset.name, preset.config);
     }
   }
@@ -1612,6 +1614,11 @@ void MainFrame::prepare_u1_page()
     return type && type->value == htMoonraker;
   };
   const Preset *chosen = is_moonraker(printers.get_edited_preset()) ? &printers.get_edited_preset() : nullptr;
+  // The U1 preset used last, then any.
+  const std::string last = wxGetApp().app_config ? wxGetApp().app_config->get("moonraker_preset") : std::string();
+  for (const Preset &p : printers.get_presets())
+    if (!chosen && !last.empty() && p.name == last && is_moonraker(p))
+      chosen = &p;
   for (const Preset &p : printers.get_presets())
     if (!chosen && p.is_visible && !p.is_default && is_moonraker(p))
       chosen = &p;
