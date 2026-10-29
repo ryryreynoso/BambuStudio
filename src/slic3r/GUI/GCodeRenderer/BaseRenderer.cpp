@@ -2734,7 +2734,10 @@ namespace Slic3r
                         append_option_item(item, offsets);
                 }
                 ImGui::Dummy({ window_padding, window_padding });
-                if (m_nozzle_nums > 1)
+                // Bambu's left/right nozzle grouping is for two-nozzle printers. On toolchangers
+                // (Snapmaker U1) filament k prints on tool k and is matched to the loaded
+                // filaments in the send dialog, as in Snapmaker Orca.
+                if (m_nozzle_nums == 2)
                     render_legend_color_arr_recommen(window_padding, is_show_left_right_result);
                 legend_height = ImGui::GetCurrentWindow()->Size.y;
                 imgui.end();
@@ -3086,7 +3089,7 @@ namespace Slic3r
             {
                 if (view_type_items.empty()) { return; }
                 if (m_last_non_helio_option_item >= (int)view_type_items.size()) { return; }
-                EViewType cur_type = m_nozzle_nums > 1 ? EViewType::Summary : EViewType::ColorPrint;
+                EViewType cur_type = m_nozzle_nums == 2 ? EViewType::Summary : EViewType::ColorPrint;
                 if (m_last_non_helio_option_item < 0) {//not set
                     m_view_type_sel = std::distance(view_type_items.begin(), std::find(view_type_items.begin(), view_type_items.end(), cur_type));
                     m_last_non_helio_option_item = m_view_type_sel;

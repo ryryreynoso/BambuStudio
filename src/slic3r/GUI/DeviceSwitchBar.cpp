@@ -17,8 +17,6 @@ namespace GUI {
 
 namespace {
 
-const wxColour COLOUR_SELECTED("#00AE42"); // Bambu's brand green
-
 wxString bambu_label()
 {
     DeviceManager *dm  = wxGetApp().getDeviceManager();
@@ -46,32 +44,39 @@ wxString bambu_label()
 DeviceSwitchBar::DeviceSwitchBar(wxWindow *parent, bool u1_page)
     : wxPanel(parent, wxID_ANY), m_u1_page(u1_page), m_timer(this)
 {
-    const bool dark = wxGetApp().dark_mode();
-    SetBackgroundColour(dark ? wxColour("#242428") : *wxWHITE);
+    // Colours StateColor's dark-mode map leaves alone, chosen per theme here, so the text always
+    // stands out from its button.
+    const bool     dark      = wxGetApp().dark_mode();
+    const wxColour bar_bg    = dark ? wxColour("#1F1F23") : wxColour("#FDFDFD");
+    const wxColour idle_bg   = dark ? wxColour("#33333A") : wxColour("#F2F2F3");
+    const wxColour idle_hov  = dark ? wxColour("#45454D") : wxColour("#E2E2E4");
+    const wxColour idle_text = dark ? wxColour("#F2F2F2") : wxColour("#1E1E1E");
+    const wxColour idle_line = dark ? wxColour("#6A6A72") : wxColour("#B8B8BC");
+    const wxColour sel_bg("#00A040");
+    const wxColour sel_text("#FDFDFD");
+    SetBackgroundColour(bar_bg);
     auto *sizer = new wxBoxSizer(wxHORIZONTAL);
     auto *title = new Label(this, _L("Printers"));
     title->SetFont(Label::Head_13);
-    title->SetForegroundColour(dark ? wxColour("#B0B0B0") : wxColour("#6B6B6B"));
+    title->SetForegroundColour(dark ? wxColour("#C8C8CC") : wxColour("#55555A"));
     sizer->Add(title, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, FromDIP(14));
 
     auto make = [&](bool selected) {
         auto *btn = new Button(this, wxEmptyString);
-        StateColor bg, fg;
         if (selected) {
-            bg = StateColor(std::pair<wxColour, int>(COLOUR_SELECTED, StateColor::Normal));
-            fg = StateColor(std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
-            btn->SetBorderColor(StateColor(std::pair<wxColour, int>(COLOUR_SELECTED, StateColor::Normal)));
+            btn->SetBackgroundColor(StateColor(std::pair<wxColour, int>(sel_bg, StateColor::Normal)));
+            btn->SetBorderColor(StateColor(std::pair<wxColour, int>(sel_bg, StateColor::Normal)));
+            btn->SetTextColor(StateColor(std::pair<wxColour, int>(sel_text, StateColor::Normal)));
+            btn->SetFont(Label::Head_13);
         } else {
-            // Light-theme colours: StateColor maps them for dark mode itself.
-            bg = StateColor(std::pair<wxColour, int>(wxColour("#E4E4E4"), StateColor::Hovered), std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
-            fg = StateColor(std::pair<wxColour, int>(wxColour("#262E30"), StateColor::Normal));
-            btn->SetBorderColor(StateColor(std::pair<wxColour, int>(wxColour("#C8C8C8"), StateColor::Normal)));
+            btn->SetBackgroundColor(StateColor(std::pair<wxColour, int>(idle_hov, StateColor::Hovered), std::pair<wxColour, int>(idle_bg, StateColor::Normal)));
+            btn->SetBorderColor(StateColor(std::pair<wxColour, int>(idle_line, StateColor::Normal)));
+            btn->SetTextColor(StateColor(std::pair<wxColour, int>(idle_text, StateColor::Normal)));
+            btn->SetFont(Label::Body_13);
         }
-        btn->SetBackgroundColor(bg);
-        btn->SetTextColor(fg);
-        btn->SetFont(Label::Body_13);
         btn->SetMinSize(wxSize(FromDIP(200), FromDIP(28)));
         btn->SetCornerRadius(FromDIP(14));
+        btn->SetCursor(wxCURSOR_HAND);
         sizer->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(10));
         return btn;
     };

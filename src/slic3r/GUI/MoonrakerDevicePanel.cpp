@@ -356,10 +356,13 @@ void MoonrakerDevicePanel::build()
         btn->SetBorderColor(wxColour(38, 46, 48));
         btn->SetMinSize(wxSize(FromDIP(80), FromDIP(28)));
         btn->SetCornerRadius(FromDIP(14));
+        btn->SetTextColor(StateColor(std::pair<wxColour, int>(wxColour("#909090"), StateColor::Disabled),
+                                     std::pair<wxColour, int>(wxColour("#262E30"), StateColor::Normal)));
         btn->Enable(false);
         controls->Add(btn, 0, wxRIGHT, FromDIP(10));
     }
-    m_btn_cancel->SetTextColor(StateColor(std::pair<wxColour, int>(COLOUR_ERROR, StateColor::Normal)));
+    m_btn_cancel->SetTextColor(StateColor(std::pair<wxColour, int>(wxColour("#909090"), StateColor::Disabled),
+                                          std::pair<wxColour, int>(COLOUR_ERROR, StateColor::Normal)));
     m_btn_pause->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { print_command("printer/print/pause", _L("Pause the print on the U1?")); });
     m_btn_resume->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { print_command("printer/print/resume", _L("Resume the print on the U1?")); });
     m_btn_cancel->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) {
