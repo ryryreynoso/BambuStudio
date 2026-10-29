@@ -24894,6 +24894,9 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     }
     {
         p->export_gcode(fs::path(), false, std::move(upload_job));
+        // A started U1 job is followed on its Device page, as Bambu printers switch to Monitor.
+        if (host_type && host_type->value == htMoonraker && post_action == PrintHostPostUploadAction::StartPrint)
+            p->main_frame->request_select_tab(MainFrame::TabPosition::tpMonitor);
 
         try {
             json          j;

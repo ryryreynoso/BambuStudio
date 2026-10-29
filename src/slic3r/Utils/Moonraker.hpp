@@ -1,6 +1,7 @@
 #ifndef slic3r_Moonraker_hpp_
 #define slic3r_Moonraker_hpp_
 
+#include <mutex>
 #include <string>
 #include <vector>
 #include <wx/string.h>
@@ -39,17 +40,29 @@ public:
     // Downloads a file Moonraker serves under server/files (for example "camera/monitor.jpg", the
     // Snapmaker U1's camera picture). Blocks; call it off the UI thread.
     bool get_file(const std::string &path, std::string &body, wxString &msg) const;
+    // GET of any Moonraker endpoint (for example "server/files/metadata?filename=..."). Returns the
+    // reply body, or an empty string with msg set. Blocks.
+    std::string get(const std::string &endpoint, wxString &msg) const;
+    // POST without a body (for example "printer/print/pause"). Blocks.
+    bool post(const std::string &endpoint, wxString &msg) const;
     // Snapmaker's print start (server.files.start_local_print over Moonraker's websocket), as Snapmaker
     // Orca sends it: the uploaded gcode path relative to the gcodes root and the options JSON
     // (map_table, bed_level, flow_calibrate, time_lapse_camera). Blocks; call it off the UI thread.
     bool start_local_print(const std::string &path, const std::string &options, wxString &msg) const;
     // Turns the Snapmaker U1's camera monitor on or off (camera.start_monitor / stop_monitor over
     // Moonraker's websocket). While it is on, camera/monitor.jpg is close to live. Blocks.
-    bool camera_monitor(bool on, wxString &msg) const;
+    // Returns false only when the request failed; confirmed is set when the U1 pushed
+    // notify_camera_status_change with the new state (it pushes nothing when the state is unchanged).
+    bool camera_monitor(bool on, wxString &msg, bool *confirmed = nullptr) const;
 
 private:
-    // Sends one JSON-RPC request over Moonraker's websocket and waits for its reply. Blocks.
-    bool websocket_call(const std::string &method, const std::string &params, int timeout_s, wxString &msg) const;
+    // Waits until print_stats shows path printing, so a start the printer ignored is reported.
+    bool wait_for_print(const std::string &path, wxString &msg) const;
+    // Sends one JSON-RPC request over Moonraker's websocket and waits for its reply. A notification
+    // named ack_method also counts as the reply (its params go to ack_params); when one is given,
+    // no reply before the timeout is not an error. Blocks.
+    bool websocket_call(const std::string &method, const std::string &params, int timeout_s, wxString &msg,
+                        const std::string &ack_method = {}, std::string *ack_params = nullptr) const;
 
     std::string m_host;
     std::string m_apikey;
@@ -61,7 +74,11 @@ private:
     // (Snapmaker printers serve the API there as well).
     std::vector<std::string> base_urls() const;
     // Returns the first base URL that answers printer/info, or an empty string with msg set.
+    // The answer is remembered until a request to it fails.
     std::string find_base_url(wxString &msg) const;
+    void        forget_base_url() const;
+    mutable std::mutex  m_base_mutex;
+    mutable std::string m_base_url;
 };
 
 } // namespace Slic3r

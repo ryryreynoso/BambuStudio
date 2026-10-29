@@ -12,6 +12,7 @@
 
 class wxBoxSizer;
 class wxTextCtrl;
+class wxStaticBitmap;
 class Button;
 class Label;
 class ProgressBar;
@@ -25,8 +26,10 @@ namespace GUI {
 
 // Device tab for Moonraker printers (Snapmaker U1), in the place of the printer's own web page: the
 // camera picture, the print job, temperatures, what each toolhead holds and the printer's errors,
-// laid out like Snapmaker Orca's device page in this app's colours. It only reads the printer:
-// printer/objects/query and the camera picture Moonraker serves, polled while the tab is visible.
+// laid out like Snapmaker Orca's device page in this app's colours. It reads printer/objects/query
+// and the camera picture Moonraker serves while the tab is visible (status keeps being read slowly
+// while it is hidden, for the print-finished notice). The only commands it sends are the camera
+// monitor and, after a confirmation, Klipper's pause / resume / cancel of the current print.
 class MoonrakerDevicePanel : public wxPanel
 {
 public:
@@ -59,6 +62,10 @@ private:
     void     apply_status(const std::string &reply, const wxString &error);
     void     apply_camera(const std::string &jpeg);
     void     show_offline(const wxString &error);
+    void     show_camera_problem(const wxString &problem);
+    void     fetch_thumbnail(const std::string &file);
+    void     print_command(const std::string &endpoint, const wxString &question);
+    void     notify_job_end(const std::string &state, const std::string &file);
 
     std::unique_ptr<DynamicPrintConfig> m_config;
     std::shared_ptr<PrintHost> m_host;
@@ -83,7 +90,21 @@ private:
     wxPanel     *m_camera{nullptr};
     Label       *m_camera_note{nullptr};
     wxImage      m_camera_image;
-    wxDateTime   m_camera_time;
+    wxDateTime   m_camera_time;    // last picture received
+    wxDateTime   m_camera_changed; // last time the picture was different from the one before
+    size_t       m_camera_hash{0};
+    wxString     m_camera_problem; // shown over the picture; empty when it is live
+    bool         m_online{false};
+
+    wxStaticBitmap *m_job_thumb{nullptr};
+    std::string     m_thumb_file; // the print file the thumbnail is for
+    std::string     m_last_job_state;
+    double          m_job_estimate{0.}; // slicer's estimate for the current file, seconds
+    Label       *m_job_speed{nullptr};
+    Label       *m_job_eta{nullptr};
+    Button      *m_btn_pause{nullptr};
+    Button      *m_btn_resume{nullptr};
+    Button      *m_btn_cancel{nullptr};
 
     Label       *m_job_file{nullptr};
     Label       *m_job_state{nullptr};

@@ -98,3 +98,20 @@ Earlier results (2026-10-26):
 ## Next steps
 
 * First prints on a real U1, watched, before relying on the output.
+
+## Camera (checked on a real U1, 2026-10-28)
+
+* There is no video stream: `/webcam` answers 502 and Moonraker lists no webcams.
+* `camera.start_monitor` `{"domain":"lan","interval":0,"expect_pw":true}` works only over
+  Moonraker's websocket (over HTTP it is "Method not found"). The U1 never replies to the request
+  id. When the state changes it pushes `notify_camera_status_change`
+  `[{"monitor_domain":"lan","monitoring":true,"timestamp":"..."}]`; when the monitor was already on
+  it pushes nothing.
+* While the monitor is on, `server/files/camera/monitor.jpg` changes about every 0.5 s (18 new
+  pictures in 8 s, polled every 0.1 s). A `?t=` query string is accepted and ignored.
+* `camera.stop_monitor` is ignored, and `camera.get_status` does not exist. The monitor lapses about
+  five minutes after the last start.
+* The Device page asks for the picture every 0.5 s, one request at a time, only while the page is
+  shown. It renews the monitor every 60 s, and asks again when the picture has not changed for
+  6 s or the printer comes back after being offline. It reports refused (401/403), missing
+  (404), stalled and offline pictures on the page.

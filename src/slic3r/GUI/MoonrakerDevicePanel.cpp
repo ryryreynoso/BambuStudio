@@ -5,11 +5,15 @@
 #include <thread>
 
 #include <wx/dcbuffer.h>
+#include <wx/msgdlg.h>
 #include <wx/mstream.h>
+#include <wx/notifmsg.h>
+#include <wx/statbmp.h>
 #include <wx/sizer.h>
 #include <wx/textctrl.h>
 #include <wx/utils.h>
 
+#include <boost/log/trivial.hpp>
 #include <nlohmann/json.hpp>
 
 #include "GUI_App.hpp"
@@ -21,6 +25,7 @@
 #include "Widgets/StateColor.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Utils.hpp"
+#include "slic3r/Utils/Http.hpp"
 #include "slic3r/Utils/Moonraker.hpp"
 
 namespace Slic3r {
@@ -43,12 +48,36 @@ const int CAMERA_MS = 500;
 // The U1 lets the monitor go about five minutes after it was last asked for, so it is asked again
 // this often while the page is open. Once the page is left it lapses even if the stop is ignored.
 const int MONITOR_RENEW_S = 60;
+// With the monitor on the picture changes every half second; this long without a change means the
+// monitor lapsed or the camera stalled, and it is asked for again (at most every ASK_AGAIN_S).
+const int CAMERA_STALE_S = 6;
+const int ASK_AGAIN_S    = 10;
+// While the page is hidden the status is still read, this many status ticks apart, so a finished
+// print can be announced.
+const int HIDDEN_POLL_TICKS = 5;
+const int THUMB_SIZE        = 96;
+
+// Moonraker paths are URL paths: each part is encoded, the slashes are kept.
+std::string encode_path(const std::string &path)
+{
+    std::string out;
+    size_t      start = 0;
+    while (true) {
+        const size_t slash = path.find('/', start);
+        out += Slic3r::Http::url_encode(path.substr(start, slash == std::string::npos ? std::string::npos : slash - start));
+        if (slash == std::string::npos)
+            break;
+        out += '/';
+        start = slash + 1;
+    }
+    return out;
+}
 
 // Klipper objects shown on the page. print_task_config (per-toolhead filament) and
 // exception_manager (errors) are Snapmaker's; other Klipper printers just leave them out.
 std::vector<std::string> queried_objects(size_t tools)
 {
-    std::vector<std::string> objects{"webhooks",   "print_stats", "display_status",     "virtual_sdcard",   "heater_bed",
+    std::vector<std::string> objects{"webhooks",   "print_stats", "display_status",     "virtual_sdcard",   "heater_bed", "gcode_move",
                                      "toolhead",   "print_task_config", "exception_manager", "temperature_sensor cavity"};
     for (size_t i = 0; i < tools; ++i)
         objects.push_back(i == 0 ? std::string("extruder") : "extruder" + std::to_string(i));
@@ -116,14 +145,32 @@ MoonrakerDevicePanel::MoonrakerDevicePanel(wxWindow *parent)
     SetBackgroundColour(COLOUR_PAGE);
     build();
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) {
+        static int hidden_ticks = 0;
         if (IsShownOnScreen())
             poll();
+        else if (m_last_job_state == "printing" || m_last_job_state == "paused") {
+            if (++hidden_ticks >= HIDDEN_POLL_TICKS) {
+                hidden_ticks = 0;
+                poll();
+            }
+        }
     }, m_timer.GetId());
     Bind(wxEVT_TIMER, [this](wxTimerEvent &) {
-        if (IsShownOnScreen())
-            fetch_camera();
-        else if (m_monitor_on)
-            set_monitor(false);
+        if (!IsShownOnScreen()) {
+            if (m_monitor_on)
+                set_monitor(false);
+            return;
+        }
+        fetch_camera();
+        // A picture that stopped changing: the monitor lapsed (the U1 drops it a few minutes after
+        // the last request, or after a restart) or the camera stalled. Ask again, and say so.
+        const wxDateTime now = wxDateTime::Now();
+        if (m_online && m_camera_changed.IsValid() && (now - m_camera_changed).GetSeconds() >= CAMERA_STALE_S) {
+            if (!m_monitor_sent.IsValid() || (now - m_monitor_sent).GetSeconds() >= ASK_AGAIN_S)
+                set_monitor(true);
+            if (m_camera_problem.empty())
+                show_camera_problem(wxString::Format(_L("The picture stopped changing at %s. Asking the camera again..."), m_camera_changed.FormatTime()));
+        }
     }, m_camera_timer.GetId());
     Bind(wxEVT_SHOW, [this](wxShowEvent &e) {
         e.Skip();
@@ -233,15 +280,25 @@ void MoonrakerDevicePanel::build()
         if (!m_camera_image.IsOk()) {
             dc.SetTextForeground(wxColour(200, 200, 200));
             dc.SetFont(Label::Body_14);
-            const wxString msg = _L("Waiting for the camera picture...");
+            const wxString msg = m_camera_problem.empty() ? _L("Waiting for the camera picture...") : m_camera_problem;
             const wxSize   ext = dc.GetTextExtent(msg);
-            dc.DrawText(msg, (size.x - ext.x) / 2, (size.y - ext.y) / 2);
+            dc.DrawText(msg, std::max(0, (size.x - ext.x) / 2), (size.y - ext.y) / 2);
             return;
         }
         const double scale = std::min(size.x / (double) m_camera_image.GetWidth(), size.y / (double) m_camera_image.GetHeight());
         const int    w = std::max(1, (int) std::lround(m_camera_image.GetWidth() * scale));
         const int    h = std::max(1, (int) std::lround(m_camera_image.GetHeight() * scale));
         dc.DrawBitmap(wxBitmap(m_camera_image.Scale(w, h, wxIMAGE_QUALITY_BILINEAR)), (size.x - w) / 2, (size.y - h) / 2);
+        if (!m_camera_problem.empty()) {
+            // An old picture stays visible, marked as old.
+            dc.SetFont(Label::Body_13);
+            const wxSize ext = dc.GetTextExtent(m_camera_problem);
+            dc.SetPen(*wxTRANSPARENT_PEN);
+            dc.SetBrush(wxBrush(wxColour(0, 0, 0)));
+            dc.DrawRectangle(0, size.y - ext.y - FromDIP(12), size.x, ext.y + FromDIP(12));
+            dc.SetTextForeground(wxColour(255, 190, 120));
+            dc.DrawText(m_camera_problem, FromDIP(10), size.y - ext.y - FromDIP(6));
+        }
     });
     m_camera->Bind(wxEVT_SIZE, [this](wxSizeEvent &e) {
         m_camera->Refresh();
@@ -256,6 +313,10 @@ void MoonrakerDevicePanel::build()
 
     wxBoxSizer *job_body = nullptr;
     wxPanel    *job_card = make_card(this, _L("Print job"), job_body);
+    wxImage     blank(FromDIP(THUMB_SIZE), FromDIP(THUMB_SIZE));
+    blank.SetRGB(wxRect(0, 0, blank.GetWidth(), blank.GetHeight()), 238, 238, 238);
+    m_job_thumb = new wxStaticBitmap(job_card, wxID_ANY, wxBitmap(blank));
+    m_job_thumb->SetToolTip(_L("The print file's preview, as the slicer saved it."));
     m_job_file = new Label(job_card, _L("No print"));
     m_job_file->SetFont(Label::Head_13);
     m_job_state = new Label(job_card, wxEmptyString);
@@ -273,14 +334,45 @@ void MoonrakerDevicePanel::build()
     m_job_layer     = new Label(job_card, wxEmptyString);
     m_job_elapsed   = new Label(job_card, wxEmptyString);
     m_job_remaining = new Label(job_card, wxEmptyString);
-    for (Label *l : {m_job_layer, m_job_elapsed, m_job_remaining}) {
+    m_job_eta       = new Label(job_card, wxEmptyString);
+    m_job_speed     = new Label(job_card, wxEmptyString);
+    for (Label *l : {m_job_layer, m_job_elapsed, m_job_remaining, m_job_eta, m_job_speed}) {
         l->SetFont(Label::Body_13);
-        stats->Add(l, 0, wxRIGHT, FromDIP(24));
+        stats->Add(l, 0, wxRIGHT, FromDIP(20));
     }
-    job_body->Add(m_job_file, 0, wxBOTTOM, FromDIP(4));
-    job_body->Add(m_job_state, 0, wxBOTTOM, FromDIP(10));
-    job_body->Add(progress_row, 0, wxEXPAND | wxBOTTOM, FromDIP(10));
-    job_body->Add(stats, 0);
+    m_job_speed->SetToolTip(_L("Klipper's speed factor (M220) the printer reports."));
+
+    StateColor job_btn_bg(std::pair<wxColour, int>(wxColour(206, 206, 206), StateColor::Pressed), std::pair<wxColour, int>(wxColour(238, 238, 238), StateColor::Hovered),
+                          std::pair<wxColour, int>(*wxWHITE, StateColor::Normal));
+    auto *controls = new wxBoxSizer(wxHORIZONTAL);
+    m_btn_pause  = new Button(job_card, _L("Pause"));
+    m_btn_resume = new Button(job_card, _L("Resume"));
+    m_btn_cancel = new Button(job_card, _L("Stop"));
+    for (Button *btn : {m_btn_pause, m_btn_resume, m_btn_cancel}) {
+        btn->SetBackgroundColor(job_btn_bg);
+        btn->SetBorderColor(wxColour(38, 46, 48));
+        btn->SetMinSize(wxSize(FromDIP(80), FromDIP(28)));
+        btn->SetCornerRadius(FromDIP(14));
+        btn->Enable(false);
+        controls->Add(btn, 0, wxRIGHT, FromDIP(10));
+    }
+    m_btn_cancel->SetTextColor(StateColor(std::pair<wxColour, int>(COLOUR_ERROR, StateColor::Normal)));
+    m_btn_pause->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { print_command("printer/print/pause", _L("Pause the print on the U1?")); });
+    m_btn_resume->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { print_command("printer/print/resume", _L("Resume the print on the U1?")); });
+    m_btn_cancel->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) {
+        print_command("printer/print/cancel", _L("Stop the print on the U1? It cannot be resumed afterwards."));
+    });
+
+    auto *job_text = new wxBoxSizer(wxVERTICAL);
+    job_text->Add(m_job_file, 0, wxBOTTOM, FromDIP(4));
+    job_text->Add(m_job_state, 0, wxBOTTOM, FromDIP(10));
+    job_text->Add(progress_row, 0, wxEXPAND | wxBOTTOM, FromDIP(10));
+    job_text->Add(stats, 0);
+    auto *job_row = new wxBoxSizer(wxHORIZONTAL);
+    job_row->Add(m_job_thumb, 0, wxRIGHT, FromDIP(14));
+    job_row->Add(job_text, 1, wxEXPAND);
+    job_body->Add(job_row, 0, wxEXPAND | wxBOTTOM, FromDIP(12));
+    job_body->Add(controls, 0);
     left->Add(job_card, 0, wxEXPAND);
     columns->Add(left, 1, wxEXPAND | wxRIGHT, FromDIP(12));
 
@@ -394,7 +486,13 @@ void MoonrakerDevicePanel::apply_host(const std::string &host)
     DynamicPrintConfig copy(*m_config);
     copy.set_key_value("print_host", new ConfigOptionString(host));
     m_host.reset(host.empty() ? nullptr : PrintHost::get_print_host(&copy));
-    m_camera_image = wxImage();
+    m_camera_image   = wxImage();
+    m_camera_hash    = 0;
+    m_camera_changed = wxDateTime();
+    m_camera_problem.clear();
+    m_online         = false;
+    m_last_job_state.clear();
+    m_thumb_file.clear();
     m_camera->Refresh();
     show_offline(host.empty() ? _L("Type the printer's address at the top right and press Connect.") : wxString());
     Layout();
@@ -424,7 +522,8 @@ void MoonrakerDevicePanel::poll()
             });
         }).detach();
     }
-    if (!m_monitor_on || !m_monitor_sent.IsValid() || (wxDateTime::Now() - m_monitor_sent).GetSeconds() >= MONITOR_RENEW_S)
+    if (m_online && IsShownOnScreen() &&
+        (!m_monitor_on || !m_monitor_sent.IsValid() || (wxDateTime::Now() - m_monitor_sent).GetSeconds() >= MONITOR_RENEW_S))
         set_monitor(true);
 }
 
@@ -437,15 +536,28 @@ void MoonrakerDevicePanel::fetch_camera()
     std::shared_ptr<bool>      alive = m_alive;
     *m_camera_busy = true;
     auto busy      = m_camera_busy;
-    std::thread([this, host, alive, busy]() {
+    // The query string only defeats caches on the way; Moonraker ignores it.
+    const std::string path = "camera/monitor.jpg?t=" + std::to_string(wxGetUTCTimeMillis().GetValue());
+    std::thread([this, host, alive, busy, path]() {
         wxString    error;
         std::string jpeg;
-        if (!static_cast<Moonraker *>(host.get())->get_file("camera/monitor.jpg", jpeg, error))
+        if (!static_cast<Moonraker *>(host.get())->get_file(path, jpeg, error))
             jpeg.clear();
-        wxGetApp().CallAfter([this, host, alive, busy, jpeg]() {
+        wxGetApp().CallAfter([this, host, alive, busy, jpeg, error]() {
             *busy = false;
-            if (*alive && host == m_host && !jpeg.empty())
+            if (!*alive || host != m_host)
+                return;
+            if (!jpeg.empty()) {
                 apply_camera(jpeg);
+                return;
+            }
+            const std::string text = into_u8(error);
+            if (text.find("401") != std::string::npos || text.find("403") != std::string::npos)
+                show_camera_problem(_L("The printer refused the camera picture. If its Moonraker needs an API key, enter it in the printer's connection settings."));
+            else if (text.find("404") != std::string::npos)
+                show_camera_problem(_L("The printer has no camera picture yet. Asking the camera to start..."));
+            else if (!error.empty())
+                show_camera_problem(_L("No camera picture") + ": " + error);
         });
     }).detach();
 }
@@ -460,24 +572,151 @@ void MoonrakerDevicePanel::set_monitor(bool on)
     // Only the U1's camera is switched on or off; nothing moves or heats.
     std::thread([host, on]() {
         wxString error;
-        static_cast<Moonraker *>(host.get())->camera_monitor(on, error);
+        bool     confirmed = false;
+        if (!static_cast<Moonraker *>(host.get())->camera_monitor(on, error, &confirmed))
+            BOOST_LOG_TRIVIAL(warning) << "U1 camera monitor " << (on ? "start" : "stop") << " failed: " << into_u8(error);
+        else
+            BOOST_LOG_TRIVIAL(info) << "U1 camera monitor " << (on ? "start" : "stop") << (confirmed ? " confirmed" : " sent (no change reported)");
     }).detach();
 }
 
 void MoonrakerDevicePanel::apply_camera(const std::string &jpeg)
 {
+    const size_t hash = std::hash<std::string>()(jpeg);
+    m_camera_time     = wxDateTime::Now();
+    if (hash == m_camera_hash)
+        return; // the U1 has not written a new picture since the last request
     wxMemoryInputStream stream(jpeg.data(), jpeg.size());
     wxImage             image;
     if (!image.LoadFile(stream, wxBITMAP_TYPE_JPEG))
-        return;
-    m_camera_image = image;
-    m_camera_time  = wxDateTime::Now();
-    m_camera_note->SetLabel(wxString::Format(_L("Live from the U1's camera, about two pictures a second. Last picture at %s."), m_camera_time.FormatTime()));
+        return; // caught half-written; the next request gets the whole picture
+    // The first picture after connecting may be old; only a change shows the camera is live.
+    const bool first  = m_camera_hash == 0;
+    m_camera_hash     = hash;
+    m_camera_image    = image;
+    if (!first) {
+        m_camera_changed = m_camera_time;
+        m_camera_problem.clear();
+        m_camera_note->SetForegroundColour(COLOUR_MUTED);
+        m_camera_note->SetLabel(wxString::Format(_L("Live from the U1's camera, about two pictures a second. Last picture at %s."), m_camera_time.FormatTime()));
+    } else {
+        m_camera_changed = m_camera_time; // the stale check starts from here
+        m_camera_note->SetLabel(_L("Starting the camera..."));
+    }
     m_camera->Refresh();
+}
+
+void MoonrakerDevicePanel::show_camera_problem(const wxString &problem)
+{
+    if (problem == m_camera_problem)
+        return;
+    m_camera_problem = problem;
+    m_camera_note->SetForegroundColour(COLOUR_WARN);
+    m_camera_note->SetLabel(problem);
+    m_camera->Refresh();
+}
+
+void MoonrakerDevicePanel::fetch_thumbnail(const std::string &file)
+{
+    m_thumb_file = file;
+    wxImage blank(FromDIP(THUMB_SIZE), FromDIP(THUMB_SIZE));
+    blank.SetRGB(wxRect(0, 0, blank.GetWidth(), blank.GetHeight()), 238, 238, 238);
+    m_job_thumb->SetBitmap(wxBitmap(blank));
+    if (file.empty() || !dynamic_cast<Moonraker *>(m_host.get()))
+        return;
+    std::shared_ptr<PrintHost> host  = m_host;
+    std::shared_ptr<bool>      alive = m_alive;
+    std::thread([this, host, alive, file]() {
+        auto       *moonraker = static_cast<Moonraker *>(host.get());
+        wxString    error;
+        std::string png;
+        double      estimate = 0.;
+        // The slicer's thumbnails, as Moonraker lists them in the file's metadata; paths are
+        // relative to the file's folder.
+        const json meta = json::parse(moonraker->get("server/files/metadata?filename=" + Http::url_encode(file), error), nullptr, false);
+        if (meta.is_object() && meta.contains("result")) {
+            const json &result = meta["result"];
+            estimate           = number(result.value("estimated_time", json()));
+            const json &thumbs = result.value("thumbnails", json::array());
+            const json *best   = nullptr;
+            for (const json &t : thumbs)
+                if (t.is_object() && t.contains("relative_path") && (!best || number(t.value("width", json())) > number(best->value("width", json()))))
+                    best = &t;
+            if (best) {
+                const size_t      slash  = file.rfind('/');
+                const std::string folder = slash == std::string::npos ? std::string() : file.substr(0, slash + 1);
+                moonraker->get_file("gcodes/" + encode_path(folder + best->at("relative_path").get<std::string>()), png, error);
+            }
+        }
+        wxGetApp().CallAfter([this, host, alive, file, png, estimate]() {
+            if (!*alive || host != m_host || file != m_thumb_file)
+                return;
+            m_job_estimate = estimate;
+            wxMemoryInputStream stream(png.data(), png.size());
+            wxImage             image;
+            if (png.empty() || !image.LoadFile(stream, wxBITMAP_TYPE_ANY))
+                return;
+            const int    side  = FromDIP(THUMB_SIZE);
+            const double scale = std::min(side / (double) image.GetWidth(), side / (double) image.GetHeight());
+            image.Rescale(std::max(1, (int) (image.GetWidth() * scale)), std::max(1, (int) (image.GetHeight() * scale)), wxIMAGE_QUALITY_HIGH);
+            image.Resize(wxSize(side, side), wxPoint((side - image.GetWidth()) / 2, (side - image.GetHeight()) / 2), 238, 238, 238);
+            m_job_thumb->SetBitmap(wxBitmap(image));
+            Layout();
+        });
+    }).detach();
+}
+
+void MoonrakerDevicePanel::print_command(const std::string &endpoint, const wxString &question)
+{
+    if (!dynamic_cast<Moonraker *>(m_host.get()))
+        return;
+    wxMessageDialog confirm(this, question, _L("Snapmaker U1"), wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+    if (confirm.ShowModal() != wxID_YES)
+        return;
+    std::shared_ptr<PrintHost> host  = m_host;
+    std::shared_ptr<bool>      alive = m_alive;
+    for (Button *btn : {m_btn_pause, m_btn_resume, m_btn_cancel})
+        btn->Enable(false); // until the next status shows what the printer did
+    std::thread([this, host, alive, endpoint]() {
+        wxString error;
+        const bool ok = static_cast<Moonraker *>(host.get())->post(endpoint, error);
+        wxGetApp().CallAfter([this, host, alive, ok, error]() {
+            if (!*alive || host != m_host)
+                return;
+            if (!ok)
+                wxMessageBox(_L("The printer did not take the command") + ":\n" + error, _L("Snapmaker U1"), wxOK | wxICON_ERROR, this);
+            poll();
+        });
+    }).detach();
+}
+
+void MoonrakerDevicePanel::notify_job_end(const std::string &state, const std::string &file)
+{
+    wxString title;
+    if (state == "complete")
+        title = _L("Print finished");
+    else if (state == "error")
+        title = _L("Print stopped with an error");
+    else if (state == "cancelled")
+        title = _L("Print stopped");
+    else
+        return;
+    wxNotificationMessage notice(title, m_name->GetLabel() + ": " + wxString::FromUTF8(file), this,
+                                 state == "complete" ? wxICON_INFORMATION : wxICON_WARNING);
+    notice.Show(wxNotificationMessage::Timeout_Auto);
 }
 
 void MoonrakerDevicePanel::show_offline(const wxString &error)
 {
+    if (!error.empty()) {
+        // Ask for the camera again as soon as the printer is back.
+        m_online     = false;
+        m_monitor_on = false;
+        for (Button *btn : {m_btn_pause, m_btn_resume, m_btn_cancel})
+            btn->Enable(false);
+        if (m_camera_image.IsOk() || m_camera_hash)
+            show_camera_problem(_L("The printer is not answering. The picture is from") + " " + m_camera_time.FormatTime() + ".");
+    }
     m_state->SetLabel(error.empty() ? (m_host ? _L("Connecting...") : wxString()) : _L("Offline"));
     m_state->SetForegroundColour(error.empty() ? COLOUR_MUTED : COLOUR_ERROR);
     m_state->SetToolTip(error);
@@ -499,6 +738,12 @@ void MoonrakerDevicePanel::apply_status(const std::string &reply, const wxString
         show_offline(error.empty() ? _L("The printer did not answer.") : error);
         Layout();
         return;
+    }
+
+    if (!m_online) {
+        m_online = true;
+        if (IsShownOnScreen() && !m_monitor_on)
+            set_monitor(true);
     }
 
     // Printer state.
@@ -532,6 +777,16 @@ void MoonrakerDevicePanel::apply_status(const std::string &reply, const wxString
     if (!active && job != "complete")
         progress = 0.;
     m_job_file->SetLabel(file.empty() ? _L("No print") : wxString::FromUTF8(file));
+    if (file != m_thumb_file) {
+        m_job_estimate = 0.;
+        fetch_thumbnail(file);
+    }
+    if ((m_last_job_state == "printing" || m_last_job_state == "paused") && !active)
+        notify_job_end(job, file);
+    m_last_job_state = job;
+    m_btn_pause->Enable(klippy == "ready" && job == "printing");
+    m_btn_resume->Enable(klippy == "ready" && job == "paused");
+    m_btn_cancel->Enable(klippy == "ready" && active);
     static const std::map<std::string, wxString> job_names{{"standby", _L("Idle")},       {"printing", _L("Printing")}, {"paused", _L("Paused")},
                                                            {"complete", _L("Finished")}, {"cancelled", _L("Cancelled")}, {"error", _L("Stopped with an error")}};
     auto       named = job_names.find(job);
@@ -549,8 +804,17 @@ void MoonrakerDevicePanel::apply_status(const std::string &reply, const wxString
     m_job_layer->SetLabel(total > 0 ? wxString::Format(_L("Layer %d / %d"), layer, total) : wxString());
     const double elapsed = number(field(status, "print_stats", "print_duration"));
     m_job_elapsed->SetLabel(active || elapsed > 0 ? _L("Elapsed") + " " + duration(elapsed) : wxString());
-    // Klipper reports no estimate; extrapolate from the file progress as Fluidd does.
-    m_job_remaining->SetLabel(active && progress > 0.01 && elapsed > 0 ? _L("Remaining") + " ~" + duration(elapsed / progress - elapsed) : wxString());
+    // Klipper reports no estimate of its own. Use the slicer's estimate from the file metadata, as
+    // Fluidd does, else extrapolate from the file progress.
+    double remaining = -1.;
+    if (active && m_job_estimate > 0)
+        remaining = std::max(0., m_job_estimate - elapsed);
+    else if (active && progress > 0.01 && elapsed > 0)
+        remaining = elapsed / progress - elapsed;
+    m_job_remaining->SetLabel(remaining >= 0 ? _L("Remaining") + " ~" + duration(remaining) : wxString());
+    m_job_eta->SetLabel(remaining >= 0 && job == "printing" ? _L("Done at") + " " + (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong) remaining)).Format("%H:%M") : wxString());
+    const json &speed = field(status, "gcode_move", "speed_factor");
+    m_job_speed->SetLabel(active && speed.is_number() ? wxString::Format(_L("Speed %d%%"), (int) std::lround(speed.get<double>() * 100.)) : wxString());
 
     // Temperatures.
     m_bed_temp->SetLabel(temperature(status, "heater_bed"));
@@ -620,6 +884,8 @@ void MoonrakerDevicePanel::msw_rescale()
     m_btn_connect->Rescale();
     m_btn_refresh->Rescale();
     m_btn_web->Rescale();
+    for (Button *btn : {m_btn_pause, m_btn_resume, m_btn_cancel})
+        btn->Rescale();
     m_job_progress->Rescale();
     Layout();
 }
