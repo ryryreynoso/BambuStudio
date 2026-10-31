@@ -1,0 +1,679 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 OrcaPad contributors
+
+import MetalKit
+import OrcaBridge
+import SwiftUI
+
+/// Complete renderer input derived from one authoritative document snapshot.
+/// presentationRevision advances for transient client-side gesture previews;
+/// frameRequest advances only for explicit camera framing requests.
+struct SceneSync {
+    var snapshot: SceneSnapshot
+    var bed: EngineBed
+    var selectedObjectID: ObjectID?
+    var selectedInstanceID: InstanceID?
+    /// The selected volume of the selected object (part selection), if any.
+    var selectedVolumeID: VolumeID?
+    /// Every selected instance (multi-selection highlight).
+    var highlightedInstanceIDs: Set<InstanceID>
+    /// Live gesture previews (engine-frame matrices) keyed by instance.
+    var previewMatrices: [InstanceID: simd_float4x4]
+    var presentationRevision: UInt64
+    var frameRequest: UInt64
+    /// Camera view preset request (advances when a preset is chosen).
+    var cameraRequest: (id: UInt64, preset: CameraViewPreset)
+    var gizmoMode: GizmoMode
+    var rotationAxis: EngineAxis
+    /// Flatten-gizmo planes of the selected instance (desktop hull grouping);
+    /// nil = unavailable (facet-tap fallback) or not in lay-flat mode.
+    var flattenPlanes: [EnginePlater.FlattenPlane]? = nil
+    /// Index of the plane highlighted under the finger (touch hover).
+    var flattenHighlight: Int? = nil
+    /// Filament slot colors (multi-filament extruder tinting).
+    var filamentColors: [SIMD4<Float>] = []
+    /// Painted-facet overlay (painter gizmo, active layer): world triangles.
+    var paintTriangles: [EnginePlater.PaintTriangle] = []
+    /// Viewer options (Plate View menu; desktop canvas view menu parity,
+    /// GLCanvas3D.cpp:9205-9257). Session state, like the camera.
+    /// Overhang highlighting: red translucent facets beyond the threshold
+    /// angle from vertical (desktop "Overhangs" + slope shader).
+    var overhangEnabled = false
+    var overhangThresholdDegrees: Double = 55
+    /// Orthographic camera (desktop "Perspective" toggle,
+    /// GLCanvas3D.cpp:9228; false here = ortho).
+    var cameraPerspective = true
+    /// 3D object name labels (desktop "Labels", GLCanvas3D.cpp:9253).
+    var showLabels = false
+    /// Bed gridlines (desktop "Gridlines", GLCanvas3D.cpp:9245).
+    var showGridlines = true
+    /// FPS readout in the renderer status line (OrcaPad quality option).
+    var showFPS = true
+    /// Filament read back from each object's settings; drives its tint.
+    var assignedFilaments: [ObjectID: Int] = [:]
+    /// View-hidden objects (desktop Hide/Show, view-only): the renderer
+    /// skips these objects' instances in every draw and pick path.
+    var hiddenObjectIDs: Set<ObjectID> = []
+    /// Measure-gizmo overlay (desktop GLGizmoMeasure, ABI v40): object-space
+    /// features + measurement line + label text; nil = no session.
+    var measureOverlay: Renderer.MeasureOverlay? = nil
+    /// VLH overlay (desktop layersediting bar, ABI v41): the selected
+    /// object's profile pairs + layer-height context + live drag band;
+    /// nil = no selection / not in VLH mode.
+    var vlhOverlay: Renderer.VLHOverlay? = nil
+    /// Brim-ears overlay (desktop GLGizmoBrimEars, ABI v42): the selected
+    /// object's ears; nil = not in brim-ears mode / no object.
+    var brimEars: Renderer.BrimEarsOverlay? = nil
+    /// Cut-connector overlay (desktop CutDialog, ABI v42): the selected
+    /// object's placed connectors; nil = outside the cut flow.
+    var cutConnectors: Renderer.CutConnectorsOverlay? = nil
+    /// The cut plane for connector placement (viewer space); non-nil only
+    /// while placement mode is active (taps place connectors on it).
+    var cutPlane: Renderer.CutPlane? = nil
+    /// Assembly explode (desktop AssembleView, ABI v42): per-instance
+    /// viewer-space render-matrix overrides (empty = normal placement).
+    var assemblyExplode: [InstanceID: simd_float4x4] = [:]
+    /// Camera zoom request (advances when a zoom step is chosen; the
+    /// scale is a multiplicative step like the pinch gesture).
+    var cameraZoomRequest: (id: UInt64, scale: Float) = (0, 1)
+}
+
+/// Manipulation callbacks from the canvas gestures (engine-space units).
+struct CanvasManipulation {
+    let onSelect: (ObjectID?, InstanceID?) -> Void
+    /// Desktop ctrl+click: long-press toggles multi-selection membership.
+    let onToggleSelect: (ObjectID, InstanceID) -> Void
+    /// Part selection: refine the (already selected) instance to one volume
+    /// (nil returns to the whole object).
+    let onSelectVolume: (ObjectID, InstanceID, VolumeID?) -> Void
+    /// Rectangle (marquee) selection: the instances whose screen footprint
+    /// intersected the drawn rectangle.
+    let onRectangleSelect: ([(objectID: ObjectID, instanceID: InstanceID)]) -> Void
+    /// Incremental bed-plane translation in engine millimetres.
+    let onMove: (SIMD2<Float>) -> Void
+    let onBegin: () -> Void
+    /// Total rotation since gesture start about the selected world axis,
+    /// radians (right-handed).
+    let onRotate: (Double, Double) -> Void
+    /// Total uniform scale factor since gesture start.
+    let onScale: (Double) -> Void
+    /// Lay flat: engine-frame normal of the tapped facet — or of the picked
+    /// hull plane when planes are available (desktop behavior).
+    let onLayFlat: (SIMD3<Double>) -> Void
+    /// Touch-hover highlight of the flatten plane under the finger.
+    let onHighlightFlattenPlane: (Int?) -> Void
+    /// Rotate mode: tapping the (selected) model cycles the rotation axis
+    /// focus (user spec; desktop picks the ring you grab instead).
+    let onCycleRotationAxis: () -> Void
+    let onEnd: () -> Void
+    /// Paint mode (ABI v36): engine world hit point + view direction of the
+    /// tap (desktop painter strokes; one stroke per tap). LAST member: the
+    /// memberwise init order follows declaration order.
+    var onPaint: ((SIMD3<Double>, SIMD3<Double>) -> Void)? = nil
+    /// Measure mode (ABI v40): the merged-mesh triangle index + raw
+    /// OBJECT-space hit point of the tap — DocumentStore builds/picks the
+    /// measure session. LAST member like onPaint.
+    var onMeasureTap: ((Renderer.FacePick) -> Void)? = nil
+    /// VLH mode (ABI v41): live drag/tap z on the profile strip (began +
+    /// every move — the store previews locally). LAST members like onPaint.
+    var onVLHDrag: ((Double) -> Void)? = nil
+    /// VLH drag end at the final z: the store commits ONE adjust mutation.
+    var onVLHEnd: ((Double) -> Void)? = nil
+    /// Brim-ears mode (ABI v42): a tap ON a marker selects/toggles it (nil
+    /// index = tapped empty space → deselect). LAST members like onPaint.
+    var onBrimEarSelect: ((Int?) -> Void)? = nil
+    /// Brim-ears mode: a tap on the object's surface places an ear at the
+    /// picked point (the store applies the desktop bed-level semantics).
+    var onBrimEarTap: ((Renderer.FacePick) -> Void)? = nil
+    /// Cut-connector placement (desktop CutDialog manual mode): a tap that
+    /// hit the cut plane inside the object places one connector there.
+    var onCutConnectorTap: ((Renderer.CutPlanePick) -> Void)? = nil
+}
+
+/// SwiftUI wrapper around MTKView + gesture recognizers.
+///
+/// Gesture model (desktop gizmo parity, touch-first):
+/// - tap: select instance (nearest ray hit); tap empty space deselects
+/// - one-finger drag starting on an instance (or the rotate/scale gizmo
+///   ring of the selection): manipulate per gizmo mode — move on the bed
+///   plane, rotate around the ring (screen-space angle), or scale (vertical)
+/// - one-finger drag elsewhere: orbit
+/// - two-finger drag: pan; pinch: zoom; double-tap: frame scene
+@MainActor
+struct MetalCanvas: UIViewRepresentable {
+    let onStatus: (String) -> Void
+    var scene: SceneSync
+    let manipulation: CanvasManipulation
+    /// MSAA (OrcaPad viewer quality option): sets the MTKView sample count
+    /// at CREATION — pipelines are built for the view's count, so the
+    /// Plate tab rebuilds the canvas (`.id(...)`) when this flips.
+    var msaa: Bool = true
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> MTKView {
+        let view = MTKView(frame: .zero, device: MTLCreateSystemDefaultDevice())
+        view.depthStencilPixelFormat = .depth32Float
+        view.sampleCount = msaa ? 4 : 1
+        view.clearColor = MTLClearColor(
+            red: 0.075,
+            green: 0.078,
+            blue: 0.093,
+            alpha: 1
+        )
+        view.isPaused = false
+        view.enableSetNeedsDisplay = false
+        view.preferredFramesPerSecond = 60
+        context.coordinator.attach(view: view, onStatus: onStatus)
+        context.coordinator.manipulation = manipulation
+        return view
+    }
+
+    func updateUIView(_ view: MTKView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.manipulation = manipulation
+        coordinator.lastVolumeOfSelection = scene.selectedVolumeID
+        coordinator.renderer?.setGizmo(mode: scene.gizmoMode, rotationAxis: scene.rotationAxis)
+        coordinator.renderer?.setFlattenPlanes(scene.flattenPlanes)
+        coordinator.renderer?.setFlattenHighlight(scene.flattenHighlight)
+        coordinator.renderer?.setFilamentColors(scene.filamentColors)
+        // Viewer options (View menu): cheap derived state, applied every
+        // update; each setter only recomputes what actually changed.
+        coordinator.renderer?.setOverhang(
+            enabled: scene.overhangEnabled,
+            thresholdDegrees: scene.overhangThresholdDegrees
+        )
+        coordinator.renderer?.camera.isOrthographic = !scene.cameraPerspective
+        coordinator.renderer?.setLabelsEnabled(scene.showLabels)
+        coordinator.renderer?.setGridlinesVisible(scene.showGridlines)
+        coordinator.renderer?.setFPSVisible(scene.showFPS)
+        coordinator.renderer?.assignedFilaments = scene.assignedFilaments
+        // Hidden objects + measure overlay follow the client stores.
+        coordinator.renderer?.setHiddenObjectIDs(scene.hiddenObjectIDs)
+        coordinator.renderer?.setMeasureOverlay(
+            scene.gizmoMode == .measure ? scene.measureOverlay : nil)
+        coordinator.renderer?.setVLHOverlay(
+            scene.gizmoMode == .vlh ? scene.vlhOverlay : nil)
+        coordinator.renderer?.setBrimEars(
+            scene.gizmoMode == .brimEars ? scene.brimEars : nil)
+        coordinator.renderer?.setCutConnectors(scene.cutConnectors)
+        coordinator.renderer?.setCutPlane(scene.cutPlane)
+        coordinator.renderer?.setAssemblyOverrides(scene.assemblyExplode)
+        let needsSceneApply =
+            scene.snapshot.documentID != coordinator.lastDocumentID ||
+            scene.snapshot.revision != coordinator.lastDocumentRevision ||
+            scene.presentationRevision != coordinator.lastPresentationRevision ||
+            scene.selectedObjectID != coordinator.lastSelectedObjectID ||
+            scene.selectedInstanceID != coordinator.lastSelectedInstanceID ||
+            scene.selectedVolumeID != coordinator.lastSelectedVolumeID
+
+        if needsSceneApply {
+            do {
+                try coordinator.renderer?.applyScene(
+                    scene.snapshot,
+                    bed: scene.bed,
+                    selectedObjectID: scene.selectedObjectID,
+                    selectedInstanceID: scene.selectedInstanceID,
+                    highlightedInstanceIDs: scene.highlightedInstanceIDs,
+                    previewMatrices: scene.previewMatrices,
+                    selectedVolumeID: scene.selectedVolumeID
+                )
+                // Painter overlay follows document revisions (paint strokes
+                // and layer switches advance the revision or reload).
+                coordinator.renderer?.setPaintOverlay(
+                    scene.gizmoMode == .paint ? scene.paintTriangles : nil)
+                coordinator.lastDocumentID = scene.snapshot.documentID
+                coordinator.lastDocumentRevision = scene.snapshot.revision
+                coordinator.lastPresentationRevision = scene.presentationRevision
+                coordinator.lastSelectedObjectID = scene.selectedObjectID
+                coordinator.lastSelectedInstanceID = scene.selectedInstanceID
+                coordinator.lastSelectedVolumeID = scene.selectedVolumeID
+            } catch {
+                coordinator.report(
+                    "Metal scene ERROR — \(String(describing: error))"
+                )
+            }
+        }
+        if scene.frameRequest != coordinator.lastFrameRequest {
+            coordinator.lastFrameRequest = scene.frameRequest
+            coordinator.renderer?.frameScene()
+        }
+        if scene.cameraRequest.id != coordinator.lastCameraRequest {
+            coordinator.lastCameraRequest = scene.cameraRequest.id
+            coordinator.renderer?.camera.apply(scene.cameraRequest.preset)
+            // View reset (desktop): Default View also re-fits the focused
+            // bed on screen instead of keeping a stale zoom.
+            if scene.cameraRequest.preset == .defaultValue {
+                coordinator.renderer?.frameBed()
+            }
+        }
+        if scene.cameraZoomRequest.id != coordinator.lastZoomRequest {
+            coordinator.lastZoomRequest = scene.cameraZoomRequest.id
+            coordinator.renderer?.camera.zoom(by: scene.cameraZoomRequest.scale)
+        }
+    }
+
+    // MARK: Coordinator — gestures + renderer lifetime
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var renderer: Renderer?
+        var lastDocumentID: DocumentID?
+        var lastDocumentRevision: DocumentRevision?
+        var lastPresentationRevision: UInt64?
+        var lastSelectedObjectID: ObjectID?
+        var lastSelectedInstanceID: InstanceID?
+        var lastSelectedVolumeID: VolumeID?
+        var lastFrameRequest: UInt64?
+        var lastCameraRequest: UInt64?
+        var lastZoomRequest: UInt64?
+
+        var manipulation: CanvasManipulation?
+        /// The renderer's current selection volume (for the tap toggle);
+        /// kept in sync by updateUIView.
+        var lastVolumeOfSelection: VolumeID?
+        private var onStatus: ((String) -> Void)?
+
+        private enum DragState {
+            case orbit
+            case move(bedOrigin: SIMD3<Float>)
+            case rotate(center: CGPoint, startAngle: Double, ringRadius: CGFloat)
+            case scale(startY: CGFloat)
+            case layFlatPlane
+            /// Rectangle selection: one-finger drag draws the marquee.
+            case marquee(start: CGPoint)
+            /// VLH strip drag: the last profile z under the finger — the
+            /// finger may lift off the strip; the commit uses the last z
+            /// the store previewed (desktop keeps the last cursor z too).
+            case vlh(lastZ: Double)
+        }
+        private var dragState: DragState?
+
+        func attach(view: MTKView, onStatus: @escaping (String) -> Void) {
+            renderer = Renderer(view: view, onStatus: onStatus)
+            self.onStatus = onStatus
+
+            let doubleTap = UITapGestureRecognizer(target: self, action: #selector(onDoubleTap(_:)))
+            doubleTap.numberOfTapsRequired = 2
+            view.addGestureRecognizer(doubleTap)
+
+            let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
+            tap.require(toFail: doubleTap)
+            view.addGestureRecognizer(tap)
+
+            let drag = UIPanGestureRecognizer(target: self, action: #selector(onDrag(_:)))
+            drag.minimumNumberOfTouches = 1
+            drag.maximumNumberOfTouches = 1
+            view.addGestureRecognizer(drag)
+
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
+            pan.minimumNumberOfTouches = 2
+            pan.maximumNumberOfTouches = 2
+            view.addGestureRecognizer(pan)
+
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
+            view.addGestureRecognizer(pinch)
+
+            // Desktop ctrl+click: long-press toggles multi-selection membership.
+            let longPress = UILongPressGestureRecognizer(
+                target: self, action: #selector(onLongPress(_:)))
+            longPress.minimumPressDuration = 0.45
+            view.addGestureRecognizer(longPress)
+        }
+
+        @objc private func onLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began,
+                  let view = gesture.view as? MTKView, let renderer else { return }
+            let location = gesture.location(in: view)
+            if let hit = renderer.pickInstance(at: location, in: view) {
+                manipulation?.onToggleSelect(hit.objectID, hit.instanceID)
+            }
+        }
+
+        func report(_ message: String) {
+            onStatus?(message)
+        }
+
+        @objc private func onTap(_ gesture: UITapGestureRecognizer) {
+            guard let view = gesture.view as? MTKView, let renderer else { return }
+            let location = gesture.location(in: view)
+            if renderer.gizmoMode == .paint {
+                // Tap-paint: hit the selected object's mesh, stroke at the
+                // hit with the camera view direction.
+                if let face = renderer.pickFace(at: location, in: view) {
+                    let forward = renderer.camera.forward
+                    let viewDir = simd_normalize(-SIMD3<Double>(
+                        Double(forward.x), Double(forward.y), Double(forward.z)))
+                    manipulation?.onPaint?(face.enginePoint, viewDir)
+                }
+                return
+            }
+            if renderer.gizmoMode == .measure {
+                // Measure: taps pick surface features (points / edges /
+                // circles / planes); everything else stays camera control.
+                if let face = renderer.pickFace(at: location, in: view) {
+                    manipulation?.onMeasureTap?(face)
+                }
+                return
+            }
+            if renderer.gizmoMode == .vlh {
+                // VLH: a tap on the profile strip is a degenerate drag —
+                // one adjust at that z (desktop applies per click); taps
+                // elsewhere keep their normal selection meaning.
+                if let z = renderer.vlhStripHit(at: location, in: view) {
+                    manipulation?.onVLHDrag?(z)
+                    manipulation?.onVLHEnd?(z)
+                    return
+                }
+            }
+            if renderer.gizmoMode == .brimEars {
+                // Desktop GLGizmoBrimEars: a tap on a marker selects/
+                // deselects it; a tap on the object places an ear at the
+                // picked surface point; empty space clears the selection.
+                if let index = renderer.pickBrimEar(at: location, in: view) {
+                    manipulation?.onBrimEarSelect?(index)
+                    return
+                }
+                if let face = renderer.pickFace(at: location, in: view) {
+                    manipulation?.onBrimEarTap?(face)
+                    return
+                }
+                manipulation?.onBrimEarSelect?(nil)
+                return
+            }
+            // Cut-connector placement (desktop CutDialog manual mode):
+            // taps on the cut plane place connectors; everything else
+            // stays camera control.
+            if let pick = renderer.pickCutPlane(at: location, in: view) {
+                manipulation?.onCutConnectorTap?(pick)
+                return
+            }
+            if renderer.gizmoMode == .layFlat {
+                // Desktop Flatten gizmo: the hull plane under the touch wins
+                // (whole coplanar region); the raw facet remains the fallback
+                // when planes are unavailable.
+                if let plane = renderer.pickFlattenPlane(at: location, in: view) {
+                    manipulation?.onHighlightFlattenPlane(nil)
+                    manipulation?.onLayFlat(plane.engineNormal)
+                    return
+                }
+                if let face = renderer.pickFace(at: location, in: view) {
+                    // Lay flat: the tapped facet decides the resting face.
+                    manipulation?.onSelect(face.objectID, face.instanceID)
+                    manipulation?.onLayFlat(face.engineNormal)
+                    return
+                }
+            } else if renderer.gizmoMode == .rotate,
+                      let hit = renderer.pickInstance(at: location, in: view),
+                      isSelected(hit) {
+                // Rotate focus follows the model: tap it to cycle X -> Y -> Z.
+                manipulation?.onCycleRotationAxis()
+            } else if let hit = renderer.pickInstance(at: location, in: view) {
+                // Desktop part selection: tapping the already-selected
+                // instance refines the selection to the tapped volume; the
+                // currently selected part toggles back to the object.
+                if renderer.selectedInstanceIDs.count == 1, isSelected(hit),
+                   let volume = renderer.pickVolume(at: location, in: view),
+                   volume.objectID == hit.objectID, volume.instanceID == hit.instanceID {
+                    let current = lastVolumeOfSelection
+                    manipulation?.onSelectVolume(
+                        hit.objectID, hit.instanceID,
+                        current == volume.volumeID ? nil : volume.volumeID
+                    )
+                } else {
+                    manipulation?.onSelect(hit.objectID, hit.instanceID)
+                }
+            } else {
+                manipulation?.onSelect(nil, nil)
+            }
+        }
+
+        @objc private func onDoubleTap(_ gesture: UITapGestureRecognizer) {
+            renderer?.frameScene()
+        }
+
+        /// Screen-space hit on the selection's gizmo ring (rotate/scale): a
+        /// generous band around the projected ring so fingers needn't cover
+        /// the object itself. Also returns the projected ring radius — the
+        /// rotate gesture picks its snap zone from the drag distance.
+        private func gizmoRingHit(at location: CGPoint, in view: MTKView)
+            -> (center: CGPoint, radius: CGFloat)? {
+            guard let renderer, let gizmo = renderer.selectedGizmo(),
+                  let center = renderer.projectToScreen(gizmo.center, in: view) else { return nil }
+            // Projected extent from several rim directions (robust for rings
+            // seen at grazing angles).
+            var radius: CGFloat = 0
+            for direction in [SIMD3<Float>(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)] {
+                if let rim = renderer.projectToScreen(gizmo.center + direction * gizmo.radius, in: view) {
+                    radius = max(radius, hypot(rim.x - center.x, rim.y - center.y))
+                }
+            }
+            let distance = hypot(location.x - center.x, location.y - center.y)
+            return distance <= radius * 1.35 + 24 ? (center, max(radius, 1)) : nil
+        }
+
+        /// Desktop GLGizmoRotate zones, by drag distance from the center as
+        /// a fraction of the ring radius: 1/3..2/3 = coarse 45° steps,
+        /// 1.0..1.1 (the scale teeth) = fine 5° steps, everywhere else free.
+        static func rotationSnapDegrees(dragDistance: CGFloat, ringRadius: CGFloat) -> Double {
+            let fraction = Double(dragDistance / max(ringRadius, 1))
+            if fraction >= 1.0 / 3.0 && fraction <= 2.0 / 3.0 { return 45 }
+            if fraction >= 1.0 && fraction <= 1.1 { return 5 }
+            return 0
+        }
+
+        @objc private func onDrag(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view as? MTKView, let renderer else { return }
+            let location = gesture.location(in: view)
+            switch gesture.state {
+            case .began:
+                dragState = beginDrag(at: location, in: view, renderer: renderer)
+            case .changed:
+                switch dragState {
+                case .move(let origin):
+                    if let bed = renderer.bedPlaneHit(at: location, in: view) {
+                        let delta = CoordinateMapper.engineDelta(fromViewer: bed - origin)
+                        manipulation?.onMove(SIMD2(delta.x, delta.y))
+                        dragState = .move(bedOrigin: bed)
+                    }
+                case .rotate(let center, let startAngle, let ringRadius):
+                    let angle = Double(atan2(location.y - center.y, location.x - center.x))
+                    // Screen y points down, so visually CCW motion decreases
+                    // the angle. A right-handed rotation looks CCW when the
+                    // axis points toward the camera — flip otherwise.
+                    let axis = CoordinateMapper.viewerAxis(renderer.rotationAxis)
+                    let facing: Double = simd_dot(renderer.camera.forward, axis) < 0 ? 1 : -1
+                    let delta = atan2(sin(startAngle - angle), cos(startAngle - angle)) * facing
+                    manipulation?.onRotate(delta, Self.rotationSnapDegrees(
+                        dragDistance: hypot(location.x - center.x, location.y - center.y),
+                        ringRadius: ringRadius
+                    ))
+                case .scale(let startY):
+                    manipulation?.onScale(exp(Double(startY - location.y) / 220))
+                case .marquee(let start):
+                    renderer.setMarquee(Self.normalizedRect(from: start, to: location))
+                case .layFlatPlane:
+                    if let plane = renderer.pickFlattenPlane(at: location, in: view) {
+                        manipulation?.onHighlightFlattenPlane(plane.index)
+                    } else {
+                        manipulation?.onHighlightFlattenPlane(nil)
+                    }
+                case .vlh(let lastZ):
+                    // Follow the finger; a lift off the strip keeps the last
+                    // previewed z (dragState stays .vlh with the old value).
+                    if let z = renderer.vlhStripHit(at: location, in: view) {
+                        manipulation?.onVLHDrag?(z)
+                        dragState = .vlh(lastZ: z)
+                    } else {
+                        dragState = .vlh(lastZ: lastZ)
+                    }
+                case .orbit, .none:
+                    let translation = gesture.translation(in: gesture.view)
+                    renderer.camera.orbit(dx: Float(translation.x), dy: Float(translation.y))
+                    gesture.setTranslation(.zero, in: gesture.view)
+                }
+            case .ended, .cancelled, .failed:
+                switch dragState {
+                case .layFlatPlane:
+                    if let plane = renderer.pickFlattenPlane(at: location, in: view) {
+                        manipulation?.onLayFlat(plane.engineNormal)
+                    }
+                    manipulation?.onHighlightFlattenPlane(nil)
+                case .vlh(let lastZ):
+                    // One drag = one undoable adjust mutation (the store
+                    // committed the preview locally all along).
+                    manipulation?.onVLHEnd?(lastZ)
+                case .move, .rotate, .scale:
+                    manipulation?.onEnd()
+                case .marquee(let start):
+                    renderer.setMarquee(nil)
+                    let rect = Self.normalizedRect(from: start, to: location)
+                    // A near-degenerate rect is a tap: the tap gesture
+                    // handles selection.
+                    if rect.width > 6, rect.height > 6 {
+                        let hits = renderer.instancesIntersecting(rect: rect, in: view)
+                        if !hits.isEmpty {
+                            manipulation?.onRectangleSelect(hits)
+                        }
+                    }
+                case .orbit, .none:
+                    break
+                }
+                dragState = nil
+            default:
+                break
+            }
+        }
+
+        private static func normalizedRect(from start: CGPoint, to end: CGPoint) -> CGRect {
+            CGRect(
+                x: min(start.x, end.x),
+                y: min(start.y, end.y),
+                width: abs(end.x - start.x),
+                height: abs(end.y - start.y)
+            )
+        }
+
+        private func beginDrag(
+            at location: CGPoint,
+            in view: MTKView,
+            renderer: Renderer
+        ) -> DragState {
+            let mode = renderer.gizmoMode
+            if mode == .paint || mode == .measure || mode == .brimEars {
+                // Strokes/feature picks/ear placements are taps; dragging
+                // stays camera control.
+                return .orbit
+            }
+            // VLH: drags on the strip adjust the profile at the finger's z
+            // (one mutation on END); drags elsewhere orbit — the desktop
+            // reserves the whole left button for profile editing only.
+            if mode == .vlh {
+                if let z = renderer.vlhStripHit(at: location, in: view) {
+                    manipulation?.onVLHDrag?(z)
+                    return .vlh(lastZ: z)
+                }
+                return .orbit
+            }
+            // Rectangle selection: a drag STARTING ON an instance draws the
+            // marquee (drag it outward to enclose a group); dragging empty
+            // space orbits — camera control stays available in every mode,
+            // exactly like desktop (taps still select).
+            if mode == .select {
+                if renderer.pickInstance(at: location, in: view) != nil {
+                    return .marquee(start: location)
+                }
+                return .orbit
+            }
+            // Finger-drag scale is UNIFORM ONLY (user spec); per-axis
+            // scaling lives in the expanded tools panel's numeric fields.
+            let hit = renderer.pickInstance(at: location, in: view)
+            if mode != .move, hit == nil, let ring = gizmoRingHit(at: location, in: view) {
+                manipulation?.onBegin()
+                return mode == .rotate
+                    ? .rotate(
+                        center: ring.center,
+                        startAngle: Double(atan2(location.y - ring.center.y, location.x - ring.center.x)),
+                        ringRadius: ring.radius
+                    )
+                    : .scale(startY: location.y)
+            }
+            guard let hit else { return .orbit }
+            if !isSelected(hit) {
+                manipulation?.onSelect(hit.objectID, hit.instanceID)
+            }
+            switch mode {
+            case .paint:
+                return .orbit  // handled above; kept for exhaustiveness
+            case .measure:
+                return .orbit  // handled above; kept for exhaustiveness
+            case .vlh:
+                return .orbit  // handled above; kept for exhaustiveness
+            case .brimEars:
+                return .orbit  // handled above; kept for exhaustiveness
+            case .layFlat:
+                // Touch-hover: dragging across the object highlights the
+                // plane under the finger (desktop hover); release applies it.
+                if let plane = renderer.pickFlattenPlane(at: location, in: view) {
+                    manipulation?.onHighlightFlattenPlane(plane.index)
+                    return .layFlatPlane
+                }
+                manipulation?.onHighlightFlattenPlane(nil)
+                return .orbit
+            case .move:
+                guard let bed = renderer.bedPlaneHit(at: location, in: view) else { return .orbit }
+                // onBegin arms the manipulation base — without it the live
+                // X/Y readouts never update during the drag (rotate/scale
+                // already called it; that's why only move was stale).
+                manipulation?.onBegin()
+                return .move(bedOrigin: bed)
+            case .rotate:
+                // Center from the hit instance itself (selection may not be
+                // re-applied to the renderer yet).
+                guard let gizmo = renderer.gizmo(objectID: hit.objectID, instanceID: hit.instanceID),
+                      let center = renderer.projectToScreen(gizmo.center, in: view) else {
+                    return .orbit
+                }
+                var ringRadius: CGFloat = 1
+                for direction in [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1)] {
+                    if let rim = renderer.projectToScreen(gizmo.center + direction * gizmo.radius, in: view) {
+                        ringRadius = max(ringRadius, hypot(rim.x - center.x, rim.y - center.y))
+                    }
+                }
+                manipulation?.onBegin()
+                return .rotate(
+                    center: center,
+                    startAngle: Double(atan2(location.y - center.y, location.x - center.x)),
+                    ringRadius: ringRadius
+                )
+            case .scale:
+                manipulation?.onBegin()
+                return .scale(startY: location.y)
+            case .select:
+                return .orbit
+            }
+        }
+
+        private func isSelected(_ hit: (objectID: ObjectID, instanceID: InstanceID)) -> Bool {
+            renderer?.selectedInstanceIDs.contains {
+                $0.objectID == hit.objectID && $0.instanceID == hit.instanceID
+            } ?? false
+        }
+
+        @objc private func onPan(_ gesture: UIPanGestureRecognizer) {
+            let translation = gesture.translation(in: gesture.view)
+            renderer?.camera.pan(
+                dx: Float(translation.x),
+                dy: Float(translation.y)
+            )
+            gesture.setTranslation(.zero, in: gesture.view)
+        }
+
+        @objc private func onPinch(_ gesture: UIPinchGestureRecognizer) {
+            renderer?.camera.zoom(by: Float(gesture.scale))
+            gesture.scale = 1
+        }
+    }
+}

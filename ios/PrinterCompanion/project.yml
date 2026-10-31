@@ -7,16 +7,73 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
+    HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCore.xcframework/ios-arm64/Headers $(SRCROOT)/NativeFTPS"
+    MARKETING_VERSION: "0.3.0"
     # Raise for every TestFlight upload; App Store Connect rejects a build number it already has.
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "8"
     DEVELOPMENT_TEAM: 4M5EAZDQVN
     CODE_SIGN_STYLE: Automatic
 targets:
+  # OrcaPad's typed facade over the engine (AGPL-3.0-only, see Studio/NOTICE.md).
+  OrcaBridge:
+    type: framework.static
+    platform: iOS
+    sources:
+      - path: Studio/OrcaBridge
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+  # The workspace: Metal viewer, toolpath preview, settings and object tools.
+  OrcaStudio:
+    type: framework.static
+    platform: iOS
+    sources:
+      - path: Studio/OrcaStudio
+    dependencies:
+      - target: OrcaBridge
+    settings:
+      base:
+        DEFINES_MODULE: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
   PrinterCompanion:
     type: application
     platform: iOS
-    sources: [Sources, Resources/Assets.xcassets]
+    dependencies:
+      - target: OrcaBridge
+      - target: OrcaStudio
+    sources:
+      - path: ../../shared/AppleCamera
+      - path: Sources
+      - path: NativeFTPS/PrinterFTPS.cpp
+      - path: Resources/CorrespondingSource.tar.gz
+        optional: true
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: Resources/printer.cer
+        buildPhase: resources
+      - path: Resources/Assets.xcassets
+      - path: Resources/system
+        type: folder
+        buildPhase: resources
+      - path: Resources/Licenses
+        type: folder
+        buildPhase: resources
+      - path: Resources/THIRD_PARTY.md
+        buildPhase: resources
+      - path: Studio/Resources/config-schema.json
+        buildPhase: resources
+      - path: Studio/Resources/settings-layout.json
+        buildPhase: resources
+      - path: Studio/Resources/Fonts
+        type: folder
+        buildPhase: resources
+      - path: Studio/Resources/Handy
+        type: folder
+        buildPhase: resources
     info:
       path: Resources/Info.plist
       properties:
@@ -29,7 +86,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         # iPad multitasking requires every orientation, or App Store Connect rejects the upload.
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
-        NSLocalNetworkUsageDescription: "Printer Companion reads the status of printers on your local network."
+        NSLocalNetworkUsageDescription: "Printer Companion connects to your printers to show status, upload sliced files and start jobs you confirm."
         # Plain HTTP only for addresses on the local network (Moonraker); everything else keeps ATS.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -39,15 +96,25 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCore.xcframework/ios-arm64/Headers $(SRCROOT)/NativeFTPS"
+        OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCore.xcframework/ios-arm64/libOrcaBridgeCore.a $(SRCROOT)/Vendor/FTPS/iphoneos/libcurl.a $(SRCROOT)/Vendor/FTPS/iphoneos/libssl.a $(SRCROOT)/Vendor/FTPS/iphoneos/libcrypto.a -lc++"
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCoreSimulator/libOrcaBridgeCore.a $(SRCROOT)/Vendor/FTPS/iphonesimulator/libcurl.a $(SRCROOT)/Vendor/FTPS/iphonesimulator/libssl.a $(SRCROOT)/Vendor/FTPS/iphonesimulator/libcrypto.a -lc++"
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
   PrinterCompanionTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [Tests]
+    sources:
+      - path: Tests
+        excludes: [FTPSFixture, CameraFixture]
     dependencies:
       - target: PrinterCompanion
+      - target: OrcaBridge
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        HEADER_SEARCH_PATHS: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCore.xcframework/ios-arm64/Headers"
+        OTHER_LDFLAGS[sdk=iphonesimulator*]: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCoreSimulator/libOrcaBridgeCore.a -lc++"
+        OTHER_LDFLAGS[sdk=iphoneos*]: "$(inherited) $(SRCROOT)/Vendor/OrcaBridgeCore.xcframework/ios-arm64/libOrcaBridgeCore.a -lc++"
 schemes:
   PrinterCompanion:
     build:

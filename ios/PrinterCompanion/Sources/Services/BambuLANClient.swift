@@ -2,10 +2,9 @@ import Foundation
 import Network
 import Security
 
-/// Reads a Bambu Lab printer's status over its LAN MQTT broker (port 8883, user "bblp", password =
+/// Connects to a Bambu Lab printer over its LAN MQTT broker (port 8883, user "bblp", password =
 /// the printer's access code). TLS is verified against Bambu's printer certificate authorities only,
-/// and the printer's certificate must name the serial number the user entered. The only message
-/// sent is the read-only "pushall" status request.
+/// and the printer's certificate must name the serial number the user entered. PrintDelivery can explicitly publish a print request; monitoring sends only pushall.
 final class BambuLANClient {
     enum Event {
         case connected
@@ -57,18 +56,7 @@ final class BambuLANClient {
     /// Chain must lead to one of Bambu's printer CAs, and the leaf certificate's common name must be
     /// the serial number. Host names are not checked because printers are reached by IP address.
     static func isTrusted(_ trust: SecTrust, serial: String) -> Bool {
-        let anchors = BambuCertificates.authoritiesDER.compactMap { SecCertificateCreateWithData(nil, $0 as CFData) }
-        SecTrustSetPolicies(trust, SecPolicyCreateBasicX509())
-        SecTrustSetAnchorCertificates(trust, anchors as CFArray)
-        SecTrustSetAnchorCertificatesOnly(trust, true)
-        var error: CFError?
-        guard SecTrustEvaluateWithError(trust, &error),
-              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
-              let leaf = chain.first else { return false }
-        var commonName: CFString?
-        SecCertificateCopyCommonName(leaf, &commonName)
-        guard let name = commonName as String? else { return false }
-        return name.caseInsensitiveCompare(serial.trimmingCharacters(in: .whitespaces)) == .orderedSame
+        CameraTrust.verify(trust, serial: serial)
     }
 
     private func handle(_ state: NWConnection.State) {
@@ -120,14 +108,30 @@ final class BambuLANClient {
                 onEvent(.failed(code == 4 || code == 5 ? "The printer rejected the access code." : "The printer refused the connection (\(code))."))
                 return
             }
-            onEvent(.connected)
             send(MQTTPacket.subscribe(packetID: 1, topic: "device/\(serial)/report"))
+
+        case .suback(let id, let codes):
+            guard id == 1, codes == [0] else {
+                onEvent(.failed("The printer refused the status subscription."))
+                connection?.cancel()
+                return
+            }
+            onEvent(.connected)
             requestFullStatus()
             startPing()
-        case .publish(_, let payload):
+        case .publish(let topic, let payload, let retained):
+            guard topic == "device/\(serial)/report", !retained else { return }
             onEvent(.report(payload))
         default:
             break
+        }
+    }
+
+    func publishRequest(_ request: [String: Any]) throws {
+        let payload = try JSONSerialization.data(withJSONObject: request)
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.send(MQTTPacket.publish(topic: "device/\(self.serial)/request", payload: payload))
         }
     }
 

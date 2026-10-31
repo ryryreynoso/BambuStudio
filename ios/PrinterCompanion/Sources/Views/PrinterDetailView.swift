@@ -2,9 +2,14 @@ import SwiftUI
 
 struct PrinterDetailView: View {
     @StateObject var monitor: PrinterMonitor
+    @EnvironmentObject private var store: PrinterStore
+    @State private var editingRelay = false
 
     var body: some View {
         List {
+            if monitor.printer.kind == .bambuLAN {
+                Section("Camera") { BambuCameraView(printer: monitor.printer) }
+            }
             if let errors = monitor.status.errors {
                 Section("Errors") {
                     if errors.isEmpty {
@@ -24,6 +29,13 @@ struct PrinterDetailView: View {
                     if let date = monitor.cameraUpdate {
                         Text("Picture from \(date.formatted(date: .omitted, time: .standard))")
                             .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if !monitor.status.filaments.isEmpty {
+                Section("AMS filaments") {
+                    ForEach(monitor.status.filaments) { filament in
+                        LabeledContent(filament.label, value: filament.material)
                     }
                 }
             }
@@ -59,6 +71,16 @@ struct PrinterDetailView: View {
             }
         }
         .navigationTitle(monitor.printer.name)
+        .toolbar {
+            if monitor.printer.kind == .moonraker {
+                Button("Remote access") { editingRelay = true }
+            }
+        }
+        .sheet(isPresented: $editingRelay, onDismiss: {
+            if let updated = store.printers.first(where: { $0.id == monitor.printer.id }), updated != monitor.printer {
+                monitor.reconfigure(updated)
+            }
+        }) { RelaySettingsView(printer: monitor.printer) }
         .onAppear { monitor.start() }
         .onDisappear { monitor.stop() }
     }

@@ -1,0 +1,6 @@
+{
+  "Info.plist": "aac50795de9a4d2d46ccce04836dd4189a0991da2e7297a34d65972e2356007a",
+  "ios-arm64/libOrcaBridgeCore.a": "21d7a2a66662f657c4211ab98e4a73c5a5f581d7b8814700b1f51466403bb51e",
+  "ios-arm64/Headers/orca_bridge.h": "c435fd57e3b4770f43498ea985ecf406b760ae604567fed9a836331aaaba052d",
+  "ios-arm64/Headers/module.modulemap": "77c0ddd930012856f55b34cc4df34682e9cee4260fbbb30a57bab6ff27a6aa39"
+}

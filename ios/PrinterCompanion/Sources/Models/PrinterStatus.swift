@@ -1,7 +1,6 @@
 import Foundation
 
-/// What the app shows for one printer. Everything is read-only: the app never sends commands that
-/// move, heat or start anything.
+/// Telemetry shown for one printer; print initiation lives in the separate delivery services.
 struct PrinterStatus: Equatable {
     struct Heater: Equatable, Identifiable {
         var id: String { name }
@@ -10,6 +9,13 @@ struct PrinterStatus: Equatable {
         var target: Double
     }
 
+    struct Filament: Equatable, Identifiable {
+        var id: Int
+        var label: String
+        var material: String
+        var color: String
+    }
+    var filaments: [Filament] = []
     var state: String = "Unknown"
     var jobName: String?
     /// 0...1
@@ -30,6 +36,18 @@ extension PrinterStatus {
     mutating func mergeBambuReport(_ payload: Data) {
         guard let root = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
               let print = root["print"] as? [String: Any] else { return }
+        if let ams = print["ams"] as? [String: Any], let units = ams["ams"] as? [[String: Any]] {
+            filaments = units.flatMap { unit -> [Filament] in
+                guard let unitID = Self.number(unit["id"]), let trays = unit["tray"] as? [[String: Any]] else { return [] }
+                return trays.compactMap { tray in
+                    guard let trayID = Self.number(tray["id"]) else { return nil }
+                    return Filament(id: Int(unitID) * 4 + Int(trayID),
+                                    label: "AMS \(Int(unitID) + 1), slot \(Int(trayID) + 1)",
+                                    material: tray["tray_type"] as? String ?? "Empty / unknown",
+                                    color: tray["tray_color"] as? String ?? "")
+                }
+            }.sorted { $0.id < $1.id }
+        }
         if let value = print["gcode_state"] as? String { state = Self.bambuStateName(value) }
         if let value = print["subtask_name"] as? String, !value.isEmpty { jobName = value }
         if let value = Self.number(print["mc_percent"]) { progress = max(0, min(1, value / 100)) }
@@ -140,6 +158,8 @@ enum MoonrakerError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unexpectedReply: return "The printer did not answer like Moonraker."
+        case .http(401), .http(403): return "Connection not authorized. Check your U1 relay pairing or printer access settings."
+        case .http(502), .http(504): return "The home relay cannot reach your U1. Check that the printer and home Mac are online."
         case .http(let status): return "The printer answered with HTTP \(status)."
         }
     }

@@ -9,8 +9,8 @@ enum MQTTPacket {
 
     enum Incoming: Equatable {
         case connack(returnCode: UInt8)
-        case suback
-        case publish(topic: String, payload: Data)
+        case suback(packetID: UInt16, codes: [UInt8])
+        case publish(topic: String, payload: Data, retained: Bool = false)
         case pingresp
         case other(type: UInt8)
     }
@@ -101,6 +101,7 @@ enum MQTTPacket {
             multiplier *= 128
             if index > 4 { throw DecodeError.malformedLength }
         }
+        guard length <= 1024 * 1024 else { throw DecodeError.malformedLength }
         return (header, length, index)
     }
 
@@ -111,7 +112,8 @@ enum MQTTPacket {
             guard body.count >= 2 else { throw DecodeError.malformedPacket }
             return .connack(returnCode: body[body.startIndex + 1])
         case PacketType.suback.rawValue:
-            return .suback
+            guard body.count == 3 else { throw DecodeError.malformedPacket }
+            return .suback(packetID: UInt16(body[body.startIndex]) << 8 | UInt16(body[body.startIndex + 1]), codes: [body[body.startIndex + 2]])
         case PacketType.pingresp.rawValue:
             return .pingresp
         case PacketType.publish.rawValue:
@@ -121,9 +123,10 @@ enum MQTTPacket {
             guard body.count >= offset else { throw DecodeError.malformedPacket }
             let topic = String(decoding: body.subdata(in: (body.startIndex + 2)..<(body.startIndex + offset)), as: UTF8.self)
             let qos = (header >> 1) & 0b11
+            guard qos == 0 else { throw DecodeError.malformedPacket }
             if qos > 0 { offset += 2 }           // packet identifier
             guard body.count >= offset else { throw DecodeError.malformedPacket }
-            return .publish(topic: topic, payload: body.subdata(in: (body.startIndex + offset)..<body.endIndex))
+            return .publish(topic: topic, payload: body.subdata(in: (body.startIndex + offset)..<body.endIndex), retained: header & 1 != 0)
         default:
             return .other(type: type)
         }

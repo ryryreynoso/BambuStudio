@@ -5,8 +5,7 @@ import Security
 enum Keychain {
     private static let service = "PrinterCompanion.bambu-access-code"
 
-    static func setAccessCode(_ code: String, for id: UUID) {
-        deleteAccessCode(for: id)
+    static func setAccessCode(_ code: String, for id: UUID) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -14,7 +13,11 @@ enum Keychain {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(code.utf8),
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let match: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                    kSecAttrService as String: service, kSecAttrAccount as String: id.uuidString]
+        var status = SecItemUpdate(match as CFDictionary, [kSecValueData as String: Data(code.utf8)] as CFDictionary)
+        if status == errSecItemNotFound { status = SecItemAdd(query as CFDictionary, nil) }
+        guard status == errSecSuccess else { throw SlicerFailure("The LAN access code could not be saved securely (Keychain \(status)). Unlock the device and try again.") }
     }
 
     static func accessCode(for id: UUID) -> String? {

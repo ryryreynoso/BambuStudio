@@ -20,7 +20,7 @@ struct PrinterListView: View {
             .overlay {
                 if store.printers.isEmpty {
                     ContentUnavailableView("No printers", systemImage: "printer",
-                                           description: Text("Add your Snapmaker U1 or Bambu Lab printer on the same Wi-Fi network."))
+                                           description: Text("Add your printer on home Wi-Fi. For U1 access away from home, pair your HTTPS home relay."))
                 }
             }
             .navigationTitle("Printers")

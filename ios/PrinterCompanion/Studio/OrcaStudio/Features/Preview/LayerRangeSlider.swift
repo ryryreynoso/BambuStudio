@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (c) 2026 OrcaPad contributors
+
+import SwiftUI
+
+/// Desktop-style vertical layer range slider: layer 0 at the bottom, the top
+/// layer at the top, two thumbs bounding the visible range. Updates stream
+/// live while dragging (the renderer only moves index windows).
+///
+/// Hit-testing is TRACK-level: a drag grabs the NEAREST thumb (decided once
+/// at drag start), so overlapping thumbs never block each other (the per-
+/// thumb hitboxes used to make coincident handles undraggable).
+struct LayerRangeSlider: View {
+    let lower: Int
+    let upper: Int
+    let maximum: Int
+    let label: (Int) -> String
+    let onChange: (_ lower: Int, _ upper: Int) -> Void
+
+    private let thumbSize: CGFloat = 26
+    @State private var draggingUpper = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let height = max(geometry.size.height - thumbSize, 1)
+            ZStack(alignment: .top) {
+                Capsule()
+                    .fill(.quaternary)
+                    .frame(width: 6)
+                    .frame(maxHeight: .infinity)
+                    .padding(.vertical, thumbSize / 2)
+
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.8))
+                    .frame(width: 6, height: max(y(lower, height) - y(upper, height), 2))
+                    .offset(y: y(upper, height) + thumbSize / 2)
+
+                thumb(value: upper, height: height, isUpper: true)
+                thumb(value: lower, height: height, isUpper: false)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())  // the whole track is draggable
+            .coordinateSpace(name: "layer-track")
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named("layer-track"))
+                    .onChanged { drag in
+                        // Decide the target thumb ONCE per drag: whichever
+                        // thumb center is nearest the touch (ties -> upper).
+                        let distanceUpper = abs(drag.location.y - (y(upper, height) + thumbSize / 2))
+                        let distanceLower = abs(drag.location.y - (y(lower, height) + thumbSize / 2))
+                        let target = value(at: drag.location.y, height: height)
+                        if distanceUpper <= distanceLower {
+                            onChange(min(lower, target), max(target, lower))
+                        } else {
+                            onChange(min(target, upper), upper)
+                        }
+                    }
+            )
+        }
+    }
+
+    private func y(_ value: Int, _ height: CGFloat) -> CGFloat {
+        guard maximum > 0 else { return height }
+        return height * (1 - CGFloat(value) / CGFloat(maximum))
+    }
+
+    private func value(at location: CGFloat, height: CGFloat) -> Int {
+        guard maximum > 0 else { return 0 }
+        let fraction = 1 - min(max((location - thumbSize / 2) / height, 0), 1)
+        return Int((fraction * CGFloat(maximum)).rounded())
+    }
+
+    private func thumb(value current: Int, height: CGFloat, isUpper: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(isUpper ? Color.accentColor : Color.secondary)
+                .frame(width: thumbSize, height: thumbSize)
+                .shadow(radius: 2)
+            Text(label(current))
+                .font(.caption2.monospaced())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6))
+                .fixedSize()
+                .offset(x: -thumbSize - 28)
+        }
+        .offset(y: y(current, height))
+        .allowsHitTesting(false)  // the track gesture owns all dragging
+    }
+}

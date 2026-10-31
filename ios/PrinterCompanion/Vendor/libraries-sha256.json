@@ -1,0 +1,9 @@
+{
+  "FTPS/iphoneos/libcrypto.a": "6ed810085743f06a929a1c494549e146e3d11796adba9e7f3189e0c8b1810146",
+  "FTPS/iphoneos/libssl.a": "ad807aaef57154853bb693ec9384a5e3659fdb23ccff73cd3df8abc42dd32546",
+  "FTPS/iphoneos/libcurl.a": "bcf024aa8dfd587d58c6bc63017615392232c83edd78ce352f793c7a9d88dc35",
+  "FTPS/iphonesimulator/libcrypto.a": "86c1fbd4c2c12acb288c6e1fbd131c9f6625e019d1410c67a2406740a36001df",
+  "FTPS/iphonesimulator/libssl.a": "4f04468d3f057d6054f82aeed029dd34fa91c18d6cdd6c27dd26c627965ffedf",
+  "FTPS/iphonesimulator/libcurl.a": "22e31ff60394785bf08bb30682c20dcc62cf4ec9411f99ec72ac9fa00ebe44a1",
+  "OrcaBridgeCore.xcframework/ios-arm64/libOrcaBridgeCore.a": "21d7a2a66662f657c4211ab98e4a73c5a5f581d7b8814700b1f51466403bb51e"
+}

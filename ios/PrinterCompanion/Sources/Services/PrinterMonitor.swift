@@ -10,7 +10,7 @@ final class PrinterMonitor: ObservableObject {
     @Published private(set) var cameraImage: Data?
     @Published private(set) var cameraUpdate: Date?
 
-    let printer: PrinterConfig
+    private(set) var printer: PrinterConfig
     private var pollTask: Task<Void, Never>?
     private var bambu: BambuLANClient?
 
@@ -18,7 +18,14 @@ final class PrinterMonitor: ObservableObject {
         self.printer = printer
     }
 
+    func reconfigure(_ printer: PrinterConfig) {
+        stop()
+        self.printer = printer
+        start()
+    }
+
     func start() {
+        stop()
         switch printer.kind {
         case .moonraker: startMoonraker()
         case .bambuLAN: startBambu()
@@ -33,21 +40,22 @@ final class PrinterMonitor: ObservableObject {
     }
 
     private func startMoonraker() {
-        let client = MoonrakerClient(host: printer.host)
+        let printer = self.printer
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
+                    let (client, route) = try await RelayConnection.select(printer)
+                    defer { if route == "Home relay" { client.session.finishTasksAndInvalidate() } }
                     let status = try await client.fetchStatus()
+                    try Task.checkCancellation()
                     self?.status = status
-                    self?.connection = "Connected"
+                    self?.connection = "Connected — " + route
                     self?.lastUpdate = Date()
-                } catch {
-                    self?.connection = error.localizedDescription
-                }
-                if let image = try? await client.fetchCameraImage() {
-                    self?.cameraImage = image
-                    self?.cameraUpdate = Date()
-                }
+                    if let image = try? await client.fetchCameraImage() {
+                        try Task.checkCancellation()
+                        self?.cameraImage = image; self?.cameraUpdate = Date()
+                    }
+                } catch { if !Task.isCancelled { self?.connection = error.localizedDescription } }
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }

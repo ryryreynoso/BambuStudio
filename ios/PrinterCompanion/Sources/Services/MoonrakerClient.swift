@@ -1,7 +1,6 @@
 import Foundation
 
-/// Reads a Klipper printer's status from Moonraker over the local network. Only GET requests to
-/// `printer/objects/query` are made.
+/// Read-only telemetry client. Upload and start requests live in MoonrakerPrintDelivery.
 struct MoonrakerClient {
     let host: String
     var session: URLSession = .shared
@@ -18,7 +17,9 @@ struct MoonrakerClient {
     }
 
     var statusURL: URL? {
-        URL(string: baseURL + "/printer/objects/query?" + Self.queriedObjects.joined(separator: "&"))
+        guard let components = URLComponents(string: baseURL), components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else { return nil }
+        return URL(string: baseURL + "/printer/objects/query?" + Self.queriedObjects.joined(separator: "&"))
     }
 
     /// The Snapmaker U1 saves a camera picture here every few seconds while its camera monitor runs
